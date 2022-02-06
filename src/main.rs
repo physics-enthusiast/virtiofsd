@@ -91,6 +91,7 @@ struct VhostUserFsThread<F: FileSystem + Send + Sync + 'static> {
     vu_req: Option<SlaveFsCacheReq>,
     event_idx: bool,
     pool: Option<ThreadPool>,
+    avail_desc_buffer: Vec<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
 }
 
 impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsThread<F> {
@@ -102,6 +103,7 @@ impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsThread<F> {
             vu_req: self.vu_req.clone(),
             event_idx: self.event_idx,
             pool: self.pool.clone(),
+            avail_desc_buffer: Default::default(),
         }
     }
 }
@@ -126,6 +128,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
             vu_req: None,
             event_idx: false,
             pool,
+            avail_desc_buffer: Default::default(),
         })
     }
 
@@ -158,13 +161,18 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
             None => return Err(Error::NoMemoryConfigured),
         };
 
-        while let Some(avail_desc) = vring
-            .get_mut()
-            .get_queue_mut()
-            .iter()
-            .map_err(|_| Error::IterateQueue)?
-            .next()
         {
+            self.avail_desc_buffer.clear();
+            let mut vring_state = vring.get_mut();
+            self.avail_desc_buffer.extend(
+                vring_state
+                    .get_queue_mut()
+                    .iter()
+                    .map_err(|_| Error::IterateQueue)?,
+            );
+        }
+
+        for chain in &self.avail_desc_buffer {
             used_any = true;
 
             // Prepare a set of objects that can be moved to the worker thread.
@@ -173,7 +181,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
             let mut vu_req = self.vu_req.clone();
             let event_idx = self.event_idx;
             let worker_vring = vring.clone();
-            let worker_desc = avail_desc.clone();
+            let worker_desc = chain.clone();
 
             self.pool.as_ref().unwrap().spawn_ok(async move {
                 let mem = atomic_mem.memory();
@@ -206,13 +214,15 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
         };
         let mut vu_req = self.vu_req.clone();
 
-        let avail_chains: Vec<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>> = vring_state
-            .get_queue_mut()
-            .iter()
-            .map_err(|_| Error::IterateQueue)?
-            .collect();
+        self.avail_desc_buffer.clear();
+        self.avail_desc_buffer.extend(
+            vring_state
+                .get_queue_mut()
+                .iter()
+                .map_err(|_| Error::IterateQueue)?,
+        );
 
-        for chain in avail_chains {
+        for chain in &self.avail_desc_buffer {
             used_any = true;
 
             let head_index = chain.head_index();
