@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use crate::util;
 use std::ffi::CString;
 use std::fs::{self, File};
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -373,23 +374,17 @@ impl Sandbox {
             return Err(Error::Unshare(std::io::Error::last_os_error()));
         }
 
-        let child = unsafe { libc::fork() };
-        match child {
-            0 => {
-                // This is the child. Request to receive SIGTERM on parent's death.
-                // FIXME: Race condition: the parent process might have died already.
-                unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
-                if uid != 0 {
-                    self.setup_id_mappings(uid, gid)?;
-                }
-                self.setup_mounts()?;
-                Ok(None)
+        let child = util::sfork().map_err(Error::Fork)?;
+        if child == 0 {
+            // This is the child.
+            if uid != 0 {
+                self.setup_id_mappings(uid, gid)?;
             }
-            x if x > 0 => {
-                // This is the parent.
-                Ok(Some(child))
-            }
-            _ => Err(Error::Fork(std::io::Error::last_os_error())),
+            self.setup_mounts()?;
+            Ok(None)
+        } else {
+            // This is the parent.
+            Ok(Some(child))
         }
     }
 
