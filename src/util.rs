@@ -106,3 +106,33 @@ pub fn sfork() -> io::Result<i32> {
     }
     Ok(child_pid)
 }
+
+pub fn wait_for_child(pid: i32) -> ! {
+    // Drop all capabilities, since the parent doesn't require any
+    // capabilities, as it'd be just waiting for the child to exit.
+    capng::clear(capng::Set::BOTH);
+    if let Err(e) = capng::apply(capng::Set::BOTH) {
+        // Don't exit the process here since we already have a child.
+        error!("warning: can't apply the parent capabilities: {}", e);
+    }
+
+    let mut status = 0;
+    // On success, `libc::waitpid()` returns the PID of the child.
+    if unsafe { libc::waitpid(pid, &mut status, 0) } != pid {
+        error!("Error during waitpid()");
+        process::exit(1);
+    }
+
+    let exit_code = if libc::WIFEXITED(status) {
+        libc::WEXITSTATUS(status)
+    } else if libc::WIFSIGNALED(status) {
+        let signal = libc::WTERMSIG(status);
+        error!("Child process terminated by signal {}", signal);
+        -signal
+    } else {
+        error!("Unexpected waitpid status: {:#X}", status);
+        libc::EXIT_FAILURE
+    };
+
+    process::exit(exit_code);
+}
