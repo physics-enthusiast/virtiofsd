@@ -1905,7 +1905,7 @@ impl FileSystem for PassthroughFs {
         linkname: &CStr,
         parent: Inode,
         name: &CStr,
-        _secctx: Option<SecContext>,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1923,11 +1923,22 @@ impl FileSystem for PassthroughFs {
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::symlinkat(linkname.as_ptr(), parent_file.as_raw_fd(), name.as_ptr()) }
         };
-        if res == 0 {
-            self.do_lookup(parent, name)
-        } else {
-            Err(io::Error::last_os_error())
+
+        if res < 0 {
+            return Err(io::Error::last_os_error());
         }
+
+        // Set security context on symlink.
+        if let Some(secctx) = secctx {
+            if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
+                unsafe {
+                    libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
+                };
+                return Err(e);
+            }
+        }
+
+        self.do_lookup(parent, name)
     }
 
     fn readlink(&self, _ctx: Context, inode: Inode) -> io::Result<Vec<u8>> {
