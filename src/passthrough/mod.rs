@@ -1028,7 +1028,7 @@ impl PassthroughFs {
         mode: u32,
         flags: u32,
         umask: u32,
-        _secctx: Option<SecContext>,
+        secctx: Option<SecContext>,
     ) -> io::Result<RawFd> {
         let fd = {
             let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
@@ -1059,10 +1059,40 @@ impl PassthroughFs {
         };
 
         if fd < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(fd)
+            return Err(io::Error::last_os_error());
         }
+
+        // Set security context
+        if let Some(secctx) = secctx {
+            // Remap security xattr name.
+            let xattr_name = match self.map_client_xattrname(&secctx.name) {
+                Ok(xattr_name) => xattr_name,
+                Err(e) => {
+                    unsafe {
+                        libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
+                    }
+                    return Err(e);
+                }
+            };
+
+            let ret = unsafe {
+                libc::fsetxattr(
+                    fd,
+                    xattr_name.as_ptr(),
+                    secctx.secctx.as_ptr() as *const libc::c_void,
+                    secctx.secctx.len(),
+                    0,
+                )
+            };
+
+            if ret != 0 {
+                unsafe {
+                    libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
+                }
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(fd)
     }
 }
 
