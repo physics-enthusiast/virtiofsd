@@ -1095,7 +1095,6 @@ impl PassthroughFs {
         Ok(fd)
     }
 
-    #[allow(dead_code)]
     fn do_mknod_mkdir_symlink_secctx(
         &self,
         parent_file: &InodeFile,
@@ -1808,7 +1807,7 @@ impl FileSystem for PassthroughFs {
         mode: u32,
         rdev: u32,
         umask: u32,
-        _secctx: Option<SecContext>,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1840,10 +1839,19 @@ impl FileSystem for PassthroughFs {
         };
 
         if res < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            self.do_lookup(parent, name)
+            return Err(io::Error::last_os_error());
         }
+
+        // Set security context on node.
+        if let Some(secctx) = secctx {
+            if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
+                unsafe {
+                    libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
+                };
+                return Err(e);
+            }
+        }
+        self.do_lookup(parent, name)
     }
 
     fn link(
