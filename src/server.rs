@@ -6,13 +6,13 @@ use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::descriptor_utils::{Reader, Writer};
 use crate::filesystem::{
     Context, DirEntry, DirectoryIterator, Entry, FileSystem, GetxattrReply, ListxattrReply,
-    ZeroCopyReader, ZeroCopyWriter,
+    SecContext, ZeroCopyReader, ZeroCopyWriter,
 };
 use crate::fuse::*;
 use crate::passthrough::util::einval;
 use crate::{Error, Result};
 use std::convert::{TryFrom, TryInto};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::mem::{size_of, MaybeUninit};
@@ -1651,4 +1651,53 @@ fn add_dirent(
 
         Ok(total_len)
     }
+}
+
+#[allow(dead_code)]
+fn parse_security_context(data: &[u8]) -> Result<Option<SecContext>> {
+    if data.len() < size_of::<SecctxHeader>() {
+        return Err(Error::DecodeMessage(einval()));
+    }
+    let (header, data) = data.split_at(size_of::<SecctxHeader>());
+    let secctx_header: SecctxHeader =
+        unsafe { std::ptr::read_unaligned(header.as_ptr() as *const SecctxHeader) };
+
+    if secctx_header.nr_secctx > 1 {
+        return Err(Error::DecodeMessage(einval()));
+    } else if secctx_header.nr_secctx == 0 {
+        // No security context sent. May be no LSM supports it.
+        return Ok(None);
+    }
+
+    if data.len() < size_of::<Secctx>() {
+        return Err(Error::DecodeMessage(einval()));
+    }
+    let (secctx_data, data) = data.split_at(size_of::<Secctx>());
+    let secctx: Secctx = unsafe { std::ptr::read_unaligned(secctx_data.as_ptr() as *const Secctx) };
+    if secctx.size == 0 {
+        return Err(Error::DecodeMessage(einval()));
+    }
+
+    let mut components = data.split_inclusive(|c| *c == b'\0');
+    let secctx_name = components.next().ok_or(Error::MissingParameter)?;
+    let (_, data) = data.split_at(secctx_name.len());
+
+    if data.len() < secctx.size as usize {
+        return Err(Error::DecodeMessage(einval()));
+    }
+
+    // Fuse client aligns the whole security context block to 64 byte
+    // boundary. So it is possible that after actual security context
+    // of secctx.size, there are some null padding bytes left. If
+    // we ever parse more data after secctx, we will have to take those
+    // null bytes into account. Total size (including null bytes) is
+    // available in SecctxHeader->size.
+    let (remaining, _) = data.split_at(secctx.size as usize);
+
+    let fuse_secctx = SecContext {
+        name: CString::from_vec_with_nul(secctx_name.to_vec()).map_err(Error::InvalidCString2)?,
+        secctx: remaining.to_vec(),
+    };
+
+    Ok(Some(fuse_secctx))
 }

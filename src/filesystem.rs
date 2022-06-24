@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 use std::convert::TryInto;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::time::Duration;
 use std::{io, mem};
@@ -313,6 +313,16 @@ impl From<fuse::InHeader> for Context {
             pid: source.pid as i32,
         }
     }
+}
+
+/// Additional security context associated with requests.
+#[derive(Clone, Debug, Default)]
+pub struct SecContext {
+    /// Name of security context
+    pub name: CString,
+
+    /// Actual security context
+    pub secctx: Vec<u8>,
 }
 
 /// A trait for iterating over the contents of a directory. This trait is needed because rust

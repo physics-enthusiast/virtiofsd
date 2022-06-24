@@ -19,7 +19,7 @@ pub mod seccomp;
 pub mod server;
 pub mod util;
 
-use std::ffi::FromBytesWithNulError;
+use std::ffi::{FromBytesWithNulError, FromVecWithNulError};
 use std::{error, fmt, io};
 
 #[derive(Debug)]
@@ -34,6 +34,8 @@ pub enum Error {
     MissingParameter,
     /// A C string parameter is invalid.
     InvalidCString(FromBytesWithNulError),
+    /// A C string parameter is invalid.
+    InvalidCString2(FromVecWithNulError),
     /// The `len` field of the header is too small.
     InvalidHeaderLength,
     /// The `size` field of the `SetxattrIn` message does not match the length
@@ -53,6 +55,7 @@ impl fmt::Display for Error {
             MissingParameter => write!(f, "one or more parameters are missing"),
             InvalidHeaderLength => write!(f, "the `len` field of the header is too small"),
             InvalidCString(err) => write!(f, "a c string parameter is invalid: {}", err),
+            InvalidCString2(err) => write!(f, "a c string parameter is invalid: {}", err),
             InvalidXattrSize((size, len)) => write!(
                 f,
                 "The `size` field of the `SetxattrIn` message does not match the length of the\
