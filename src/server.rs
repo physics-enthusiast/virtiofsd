@@ -9,6 +9,7 @@ use crate::filesystem::{
     ZeroCopyReader, ZeroCopyWriter,
 };
 use crate::fuse::*;
+use crate::passthrough::util::einval;
 use crate::{Error, Result};
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CStr;
@@ -360,14 +361,14 @@ impl<F: FileSystem + Sync> Server<F> {
 
         r.read_exact(&mut buf).map_err(Error::DecodeMessage)?;
 
-        // We want to include the '\0' byte in the first slice.
-        let split_pos = buf
-            .iter()
-            .position(|c| *c == b'\0')
-            .map(|p| p + 1)
-            .ok_or(Error::MissingParameter)?;
+        let mut components = buf.split_inclusive(|c| *c == b'\0');
 
-        let (name, linkname) = buf.split_at(split_pos);
+        let name = components.next().ok_or(Error::MissingParameter)?;
+        let linkname = components.next().ok_or(Error::MissingParameter)?;
+
+        if components.next().is_some() {
+            return Err(Error::DecodeMessage(einval()));
+        }
 
         match self.fs.symlink(
             Context::from(in_header),
