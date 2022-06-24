@@ -1094,6 +1094,67 @@ impl PassthroughFs {
         }
         Ok(fd)
     }
+
+    #[allow(dead_code)]
+    fn do_mknod_mkdir_symlink_secctx(
+        &self,
+        parent_file: &InodeFile,
+        name: &CStr,
+        secctx: &SecContext,
+    ) -> io::Result<()> {
+        // Remap security xattr name.
+        let xattr_name = self.map_client_xattrname(&secctx.name)?;
+
+        // Set security context on newly created node. It could be
+        // device node as well, so it is not safe to open the node
+        // and call fsetxattr(). Instead, use the fchdir(proc_fd)
+        // and call setxattr(o_path_fd). We use this trick while
+        // setting xattr as well.
+
+        // Open O_PATH fd for dir/symlink/special node just created.
+        let path_fd = unsafe {
+            libc::openat(
+                parent_file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_PATH | libc::O_NOFOLLOW,
+            )
+        };
+        if path_fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let procname = CString::new(format!("{}", path_fd))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+
+        let procname = match procname {
+            Ok(name) => name,
+            Err(error) => {
+                return Err(error);
+            }
+        };
+
+        let err = unsafe { libc::fchdir(self.proc_self_fd.as_raw_fd()) };
+        assert!(err == 0);
+        let res = unsafe {
+            libc::setxattr(
+                procname.as_ptr(),
+                xattr_name.as_ptr(),
+                secctx.secctx.as_ptr() as *const libc::c_void,
+                secctx.secctx.len(),
+                0,
+            )
+        };
+
+        let res_err = io::Error::last_os_error();
+
+        let err = unsafe { libc::fchdir(self.root_fd.as_raw_fd()) };
+        assert!(err == 0);
+
+        if res == 0 {
+            Ok(())
+        } else {
+            Err(res_err)
+        }
+    }
 }
 
 fn forget_one(inodes: &mut InodeStore, inode: Inode, count: u64) {
