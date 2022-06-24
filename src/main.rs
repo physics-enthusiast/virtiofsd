@@ -605,6 +605,11 @@ struct Opt {
     /// Compatibility option that has no effect [deprecated]
     #[structopt(short = "f")]
     compat_foreground: bool,
+
+    /// Enable security label support. Expects SELinux xattr on file creation
+    /// from client and stores it in the newly created file.
+    #[structopt(long = "security-label")]
+    security_label: bool,
 }
 
 fn parse_compat(opt: Opt) -> Opt {
@@ -670,6 +675,8 @@ fn parse_compat(opt: Opt) -> Opt {
             "no_killpriv_v2" => opt.killpriv_v2 = false,
             "posix_acl" => opt.posix_acl = true,
             "no_posix_acl" => opt.posix_acl = false,
+            "security_label" => opt.security_label = true,
+            "no_security_label" => opt.security_label = false,
             "no_posix_lock" | "no_flock" => (),
             _ => argument_error(option),
         }
@@ -991,6 +998,7 @@ fn main() {
             writeback: opt.writeback,
             allow_direct_io: opt.allow_direct_io,
             killpriv_v2,
+            security_label: opt.security_label,
             posix_acl: opt.posix_acl,
             ..Default::default()
         },

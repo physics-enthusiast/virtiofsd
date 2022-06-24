@@ -377,6 +377,14 @@ pub struct Config {
     ///
     /// The default is `false`.
     pub posix_acl: bool,
+
+    /// If `security_label` is true, then server will indicate to client
+    /// to send any security context associated with file during file
+    /// creation and set that security context on newly created file.
+    /// This security context is expected to be security.selinux.
+    ///
+    /// The default is `false`.
+    pub security_label: bool,
 }
 
 impl Default for Config {
@@ -399,6 +407,7 @@ impl Default for Config {
             allow_direct_io: false,
             killpriv_v2: false,
             posix_acl: false,
+            security_label: false,
         }
     }
 }
@@ -1267,6 +1276,14 @@ impl FileSystem for PassthroughFs {
             }
         }
 
+        if self.cfg.security_label {
+            if capable.contains(FsOptions::SECURITY_CTX) {
+                opts |= FsOptions::SECURITY_CTX;
+            } else {
+                error!("Cannot enable security label. kernel does not support FUSE_SECURITY_CTX capability");
+                return Err(io::Error::from_raw_os_error(libc::EPROTO));
+            }
+        }
         Ok(opts)
     }
 
