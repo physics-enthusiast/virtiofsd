@@ -480,6 +480,7 @@ pub trait FileSystem {
         linkname: &CStr,
         parent: Self::Inode,
         name: &CStr,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -495,6 +496,7 @@ pub trait FileSystem {
     ///
     /// If this call is successful then the lookup count of the `Inode` associated with the returned
     /// `Entry` must be increased by 1.
+    #[allow(clippy::too_many_arguments)]
     fn mknod(
         &self,
         ctx: Context,
@@ -503,6 +505,7 @@ pub trait FileSystem {
         mode: u32,
         rdev: u32,
         umask: u32,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -522,6 +525,7 @@ pub trait FileSystem {
         name: &CStr,
         mode: u32,
         umask: u32,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -665,6 +669,7 @@ pub trait FileSystem {
         kill_priv: bool,
         flags: u32,
         umask: u32,
+        secctx: Option<SecContext>,
     ) -> io::Result<(Entry, Option<Self::Handle>, OpenOptions)> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }

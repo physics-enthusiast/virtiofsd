@@ -366,15 +366,21 @@ impl<F: FileSystem + Sync> Server<F> {
         let name = components.next().ok_or(Error::MissingParameter)?;
         let linkname = components.next().ok_or(Error::MissingParameter)?;
 
-        if components.next().is_some() {
-            return Err(Error::DecodeMessage(einval()));
-        }
+        let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
+
+        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
+            let (_, secctx_data) = buf.split_at(name.len() + linkname.len());
+            parse_security_context(secctx_data)?
+        } else {
+            None
+        };
 
         match self.fs.symlink(
             Context::from(in_header),
             bytes_to_cstr(linkname)?,
             in_header.nodeid.into(),
             bytes_to_cstr(name)?,
+            secctx,
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -390,21 +396,33 @@ impl<F: FileSystem + Sync> Server<F> {
             mode, rdev, umask, ..
         } = r.read_obj().map_err(Error::DecodeMessage)?;
 
-        let namelen = (in_header.len as usize)
+        let remaining_len = (in_header.len as usize)
             .checked_sub(size_of::<InHeader>())
             .and_then(|l| l.checked_sub(size_of::<MknodIn>()))
             .ok_or(Error::InvalidHeaderLength)?;
-        let mut name = vec![0; namelen];
+        let mut buf = vec![0; remaining_len];
 
-        r.read_exact(&mut name).map_err(Error::DecodeMessage)?;
+        r.read_exact(&mut buf).map_err(Error::DecodeMessage)?;
+        let mut components = buf.split_inclusive(|c| *c == b'\0');
+        let name = components.next().ok_or(Error::MissingParameter)?;
+
+        let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
+
+        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
+            let (_, secctx_data) = buf.split_at(name.len());
+            parse_security_context(secctx_data)?
+        } else {
+            None
+        };
 
         match self.fs.mknod(
             Context::from(in_header),
             in_header.nodeid.into(),
-            bytes_to_cstr(&name)?,
+            bytes_to_cstr(name)?,
             mode,
             rdev,
             umask,
+            secctx,
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -418,20 +436,32 @@ impl<F: FileSystem + Sync> Server<F> {
     fn mkdir(&self, in_header: InHeader, mut r: Reader, w: Writer) -> Result<usize> {
         let MkdirIn { mode, umask } = r.read_obj().map_err(Error::DecodeMessage)?;
 
-        let namelen = (in_header.len as usize)
+        let remaining_len = (in_header.len as usize)
             .checked_sub(size_of::<InHeader>())
             .and_then(|l| l.checked_sub(size_of::<MkdirIn>()))
             .ok_or(Error::InvalidHeaderLength)?;
-        let mut name = vec![0; namelen];
+        let mut buf = vec![0; remaining_len];
 
-        r.read_exact(&mut name).map_err(Error::DecodeMessage)?;
+        r.read_exact(&mut buf).map_err(Error::DecodeMessage)?;
+        let mut components = buf.split_inclusive(|c| *c == b'\0');
+        let name = components.next().ok_or(Error::MissingParameter)?;
+
+        let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
+
+        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
+            let (_, secctx_data) = buf.split_at(name.len());
+            parse_security_context(secctx_data)?
+        } else {
+            None
+        };
 
         match self.fs.mkdir(
             Context::from(in_header),
             in_header.nodeid.into(),
-            bytes_to_cstr(&name)?,
+            bytes_to_cstr(name)?,
             mode,
             umask,
+            secctx,
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -1282,27 +1312,37 @@ impl<F: FileSystem + Sync> Server<F> {
             ..
         } = r.read_obj().map_err(Error::DecodeMessage)?;
 
-        let namelen = (in_header.len as usize)
+        let remaining_len = (in_header.len as usize)
             .checked_sub(size_of::<InHeader>())
             .and_then(|l| l.checked_sub(size_of::<CreateIn>()))
             .ok_or(Error::InvalidHeaderLength)?;
 
-        let mut buf = vec![0; namelen];
+        let mut buf = vec![0; remaining_len];
 
         r.read_exact(&mut buf).map_err(Error::DecodeMessage)?;
+        let mut components = buf.split_inclusive(|c| *c == b'\0');
+        let name = components.next().ok_or(Error::MissingParameter)?;
 
-        let name = bytes_to_cstr(&buf)?;
+        let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
+
+        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
+            let (_, secctx_data) = buf.split_at(name.len());
+            parse_security_context(secctx_data)?
+        } else {
+            None
+        };
 
         let kill_priv = open_flags & OPEN_KILL_SUIDGID != 0;
 
         match self.fs.create(
             Context::from(in_header),
             in_header.nodeid.into(),
-            name,
+            bytes_to_cstr(name)?,
             mode,
             kill_priv,
             flags,
             umask,
+            secctx,
         ) {
             Ok((entry, handle, opts)) => {
                 let entry_out = EntryOut {
@@ -1653,7 +1693,6 @@ fn add_dirent(
     }
 }
 
-#[allow(dead_code)]
 fn parse_security_context(data: &[u8]) -> Result<Option<SecContext>> {
     if data.len() < size_of::<SecctxHeader>() {
         return Err(Error::DecodeMessage(einval()));

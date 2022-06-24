@@ -11,7 +11,7 @@ pub mod xattrmap;
 
 use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::filesystem::{
-    Context, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions,
+    Context, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions, SecContext,
     SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
 };
 use crate::fuse;
@@ -1208,6 +1208,7 @@ impl FileSystem for PassthroughFs {
         name: &CStr,
         mode: u32,
         umask: u32,
+        _secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1296,6 +1297,7 @@ impl FileSystem for PassthroughFs {
         kill_priv: bool,
         flags: u32,
         umask: u32,
+        _secctx: Option<SecContext>,
     ) -> io::Result<(Entry, Option<Handle>, OpenOptions)> {
         let data = self
             .inodes
@@ -1693,6 +1695,7 @@ impl FileSystem for PassthroughFs {
         mode: u32,
         rdev: u32,
         umask: u32,
+        _secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1781,6 +1784,7 @@ impl FileSystem for PassthroughFs {
         linkname: &CStr,
         parent: Inode,
         name: &CStr,
+        _secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
