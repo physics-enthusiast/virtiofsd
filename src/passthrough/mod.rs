@@ -15,7 +15,7 @@ use crate::filesystem::{
     SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
 };
 use crate::fuse;
-use crate::passthrough::inode_store::{Inode, InodeData, InodeIds, InodeStore};
+use crate::passthrough::inode_store::{Inode, InodeData, InodeFile, InodeIds, InodeStore};
 use crate::passthrough::util::{ebadf, einval, is_safe_inode, openat, reopen_fd_through_proc};
 use crate::read_dir::ReadDir;
 use file_handle::{FileHandle, FileOrHandle, OpenableFileHandle};
@@ -1018,6 +1018,52 @@ impl PassthroughFs {
             }
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn do_create(
+        &self,
+        ctx: &Context,
+        parent_file: &InodeFile,
+        name: &CStr,
+        mode: u32,
+        flags: u32,
+        umask: u32,
+        _secctx: Option<SecContext>,
+    ) -> io::Result<RawFd> {
+        let fd = {
+            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _umask_guard = if self.posix_acl.load(Ordering::Relaxed) {
+                set_umask(umask)?
+            } else {
+                None
+            };
+
+            // Safe because this doesn't modify any memory and we check the return value. We don't
+            // really check `flags` because if the kernel can't handle poorly specified flags then we
+            // have much bigger problems.
+            //
+            // Add libc:O_EXCL to ensure we're not accidentally opening a file the guest wouldn't
+            // be allowed to access otherwise.
+            unsafe {
+                libc::openat(
+                    parent_file.as_raw_fd(),
+                    name.as_ptr(),
+                    flags as i32
+                        | libc::O_CREAT
+                        | libc::O_CLOEXEC
+                        | libc::O_NOFOLLOW
+                        | libc::O_EXCL,
+                    mode,
+                )
+            }
+        };
+
+        if fd < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(fd)
+        }
+    }
 }
 
 fn forget_one(inodes: &mut InodeStore, inode: Inode, count: u64) {
@@ -1297,7 +1343,7 @@ impl FileSystem for PassthroughFs {
         kill_priv: bool,
         flags: u32,
         umask: u32,
-        _secctx: Option<SecContext>,
+        secctx: Option<SecContext>,
     ) -> io::Result<(Entry, Option<Handle>, OpenOptions)> {
         let data = self
             .inodes
@@ -1309,66 +1355,42 @@ impl FileSystem for PassthroughFs {
 
         let parent_file = data.get_file()?;
 
-        let fd = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
-            let _umask_guard = if self.posix_acl.load(Ordering::Relaxed) {
-                set_umask(umask)?
-            } else {
-                None
-            };
+        let fd = self.do_create(&ctx, &parent_file, name, mode, flags, umask, secctx);
 
-            // Safe because this doesn't modify any memory and we check the return value. We don't
-            // really check `flags` because if the kernel can't handle poorly specified flags then we
-            // have much bigger problems.
-            //
-            // Add libc:O_EXCL to ensure we're not accidentally opening a file the guest wouldn't
-            // be allowed to access otherwise.
-            unsafe {
-                libc::openat(
-                    parent_file.as_raw_fd(),
-                    name.as_ptr(),
-                    flags as i32
-                        | libc::O_CREAT
-                        | libc::O_CLOEXEC
-                        | libc::O_NOFOLLOW
-                        | libc::O_EXCL,
-                    mode,
-                )
-            }
-        };
-
-        let (entry, handle) = if fd < 0 {
-            // Ignore the error if the file exists and O_EXCL is not present in `flags`
-            let last_error = io::Error::last_os_error();
-            match last_error.kind() {
-                io::ErrorKind::AlreadyExists => {
-                    if (flags as i32 & libc::O_EXCL) != 0 {
-                        return Err(last_error);
+        let (entry, handle) = match fd {
+            Err(last_error) => {
+                // Ignore the error if the file exists and O_EXCL is not present in `flags`
+                match last_error.kind() {
+                    io::ErrorKind::AlreadyExists => {
+                        if (flags as i32 & libc::O_EXCL) != 0 {
+                            return Err(last_error);
+                        }
                     }
+                    _ => return Err(last_error),
                 }
-                _ => return Err(last_error),
+
+                let entry = self.do_lookup(parent, name)?;
+                let (handle, _) = self.do_open(entry.inode, kill_priv, flags)?;
+                let handle = handle.ok_or_else(ebadf)?;
+
+                (entry, handle)
             }
+            Ok(fd) => {
+                // Safe because we just opened this fd.
+                let file = RwLock::new(unsafe { File::from_raw_fd(fd) });
 
-            let entry = self.do_lookup(parent, name)?;
-            let (handle, _) = self.do_open(entry.inode, kill_priv, flags)?;
-            let handle = handle.ok_or_else(ebadf)?;
+                let entry = self.do_lookup(parent, name)?;
 
-            (entry, handle)
-        } else {
-            // Safe because we just opened this fd.
-            let file = RwLock::new(unsafe { File::from_raw_fd(fd) });
+                let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
+                let data = HandleData {
+                    inode: entry.inode,
+                    file,
+                };
 
-            let entry = self.do_lookup(parent, name)?;
+                self.handles.write().unwrap().insert(handle, Arc::new(data));
 
-            let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
-            let data = HandleData {
-                inode: entry.inode,
-                file,
-            };
-
-            self.handles.write().unwrap().insert(handle, Arc::new(data));
-
-            (entry, handle)
+                (entry, handle)
+            }
         };
 
         let mut opts = OpenOptions::empty();
