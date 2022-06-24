@@ -141,6 +141,11 @@ Enable support for extended attributes.
 ```
 Enable support for posix ACLs (implies --xattr)
 
+```shell
+--security-label
+```
+Enable support for security label (SELinux).
+
 #### Options
 ```shell
 --shared-dir <shared-dir>
@@ -350,3 +355,32 @@ mount -o bind share1 share/sh1
 virtiofsd --announce-submounts --shared-dir share ...
 ```
 Note the use of `--announce-submounts` to prevent data loss/corruption.
+
+## SELinux Support
+One can enable support for SELinux by running virtiofsd with option
+"--security-label". But this will try to save guest's security context
+in xattr security.selinux on host and it might fail if host's SELinux
+policy does not permit virtiofsd to do this operation.
+
+Hence, it is recommended to remap guest's "security.selinux" xattr to say
+"trusted.virtiofs.security.selinux" on host. Add following option to
+command line.
+
+"--xattrmap=:map:security.selinux:trusted.virtiofs.:"
+
+This will make sure that guest and host's SELinux xattrs on same file
+remain separate and not interfere with each other. And will allow both
+host and guest to implement their own separate SELinux policies.
+
+Setting trusted xattr on host requires CAP_SYS_ADMIN. So one will need
+add this capability to daemon. Add following option to command line.
+
+"--modcaps=+sys_admin"
+
+trusted xattrs are not namespaced. So virtiofsd needs to have CAP_SYS_ADMIN
+in init_user_ns. IOW, one should not be using user namespaces and virtiofsd
+should run with CAP_SYS_ADMIN.
+
+Giving CAP_SYS_ADMIN increases the risk on system. Now virtiofsd is more
+powerful and if gets compromised, it can do lot of damage to host system.
+So keep this trade-off in my mind while making a decision.
