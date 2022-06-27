@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 use std::convert::TryInto;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::time::Duration;
 use std::{io, mem};
@@ -315,6 +315,16 @@ impl From<fuse::InHeader> for Context {
     }
 }
 
+/// Additional security context associated with requests.
+#[derive(Clone, Debug, Default)]
+pub struct SecContext {
+    /// Name of security context
+    pub name: CString,
+
+    /// Actual security context
+    pub secctx: Vec<u8>,
+}
+
 /// A trait for iterating over the contents of a directory. This trait is needed because rust
 /// doesn't support generic associated types, which means that it's not possible to implement a
 /// regular iterator that yields a `DirEntry` due to its generic lifetime parameter.
@@ -470,6 +480,7 @@ pub trait FileSystem {
         linkname: &CStr,
         parent: Self::Inode,
         name: &CStr,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -485,6 +496,7 @@ pub trait FileSystem {
     ///
     /// If this call is successful then the lookup count of the `Inode` associated with the returned
     /// `Entry` must be increased by 1.
+    #[allow(clippy::too_many_arguments)]
     fn mknod(
         &self,
         ctx: Context,
@@ -493,6 +505,7 @@ pub trait FileSystem {
         mode: u32,
         rdev: u32,
         umask: u32,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -512,6 +525,7 @@ pub trait FileSystem {
         name: &CStr,
         mode: u32,
         umask: u32,
+        secctx: Option<SecContext>,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -655,6 +669,7 @@ pub trait FileSystem {
         kill_priv: bool,
         flags: u32,
         umask: u32,
+        secctx: Option<SecContext>,
     ) -> io::Result<(Entry, Option<Self::Handle>, OpenOptions)> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
