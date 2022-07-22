@@ -787,17 +787,7 @@ fn parse_modcaps(
     (required_caps, disabled_caps)
 }
 
-fn drop_parent_capabilities() {
-    // The parent doesn't require any capabilities, as it'd be just waiting for
-    // the child to exit.
-    capng::clear(capng::Set::BOTH);
-    if let Err(e) = capng::apply(capng::Set::BOTH) {
-        // Don't exit the process here since we already have a child.
-        error!("warning: can't apply the parent capabilities: {}", e);
-    }
-}
-
-fn drop_child_capabilities(inode_file_handles: InodeFileHandlesMode, modcaps: Option<String>) {
+fn drop_capabilities(inode_file_handles: InodeFileHandlesMode, modcaps: Option<String>) {
     let default_caps = vec![
         "CHOWN",
         "DAC_OVERRIDE",
@@ -955,53 +945,31 @@ fn main() {
         error!("Error creating sandbox: {}", error);
         process::exit(1)
     });
-    let fs_cfg = match sandbox.enter().unwrap_or_else(|error| {
+
+    // Enter the sandbox, from this point the process will be isolated (or not)
+    // as chosen in '--sandbox'.
+    sandbox.enter().unwrap_or_else(|error| {
         error!("Error entering sandbox: {}", error);
         process::exit(1)
-    }) {
-        // `enter()` returns the PID of the child to the parent, if it forked.
-        Some(child_pid) => {
-            drop_parent_capabilities();
-            let mut status = 0;
-            // On success, `libc::waitpid()` returns the PID of the child.
-            if unsafe { libc::waitpid(child_pid, &mut status, 0) } != child_pid {
-                error!("Error during waitpid()");
-                process::exit(1);
-            }
+    });
 
-            let exit_code = if libc::WIFEXITED(status) {
-                libc::WEXITSTATUS(status)
-            } else if libc::WIFSIGNALED(status) {
-                let signal = libc::WTERMSIG(status);
-                error!("Child process terminated by signal {}", signal);
-                -signal
-            } else {
-                error!("Unexpected waitpid status: {:#X}", status);
-                libc::EXIT_FAILURE
-            };
-
-            process::exit(exit_code);
-        }
-        // `enter()` returns `None` to the process that should proceed (i.e. to the child, if it
-        // forked).
-        None => passthrough::Config {
-            cache_policy: opt.cache,
-            root_dir: sandbox.get_root_dir(),
-            mountinfo_prefix: sandbox.get_mountinfo_prefix(),
-            xattr,
-            xattrmap,
-            proc_sfd_rawfd: sandbox.get_proc_self_fd(),
-            proc_mountinfo_rawfd: sandbox.get_mountinfo_fd(),
-            announce_submounts: opt.announce_submounts,
-            inode_file_handles: opt.inode_file_handles.into(),
-            readdirplus,
-            writeback: opt.writeback,
-            allow_direct_io: opt.allow_direct_io,
-            killpriv_v2,
-            security_label: opt.security_label,
-            posix_acl: opt.posix_acl,
-            ..Default::default()
-        },
+    let fs_cfg = passthrough::Config {
+        cache_policy: opt.cache,
+        root_dir: sandbox.get_root_dir(),
+        mountinfo_prefix: sandbox.get_mountinfo_prefix(),
+        xattr,
+        xattrmap,
+        proc_sfd_rawfd: sandbox.get_proc_self_fd(),
+        proc_mountinfo_rawfd: sandbox.get_mountinfo_fd(),
+        announce_submounts: opt.announce_submounts,
+        inode_file_handles: opt.inode_file_handles.into(),
+        readdirplus,
+        writeback: opt.writeback,
+        allow_direct_io: opt.allow_direct_io,
+        killpriv_v2,
+        security_label: opt.security_label,
+        posix_acl: opt.posix_acl,
+        ..Default::default()
     };
 
     // Must happen before we start the thread pool
@@ -1010,7 +978,7 @@ fn main() {
         _ => enable_seccomp(opt.seccomp, opt.syslog).unwrap(),
     }
 
-    drop_child_capabilities(fs_cfg.inode_file_handles, opt.modcaps);
+    drop_capabilities(fs_cfg.inode_file_handles, opt.modcaps);
 
     let fs = match PassthroughFs::new(fs_cfg) {
         Ok(fs) => fs,

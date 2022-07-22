@@ -341,7 +341,7 @@ impl Sandbox {
         Ok(())
     }
 
-    pub fn enter_namespace(&mut self) -> Result<Option<i32>, Error> {
+    pub fn enter_namespace(&mut self) -> Result<(), Error> {
         let uid = unsafe { libc::geteuid() };
         let gid = unsafe { libc::getegid() };
 
@@ -381,14 +381,14 @@ impl Sandbox {
                 self.setup_id_mappings(uid, gid)?;
             }
             self.setup_mounts()?;
-            Ok(None)
+            Ok(())
         } else {
             // This is the parent.
-            Ok(Some(child))
+            util::wait_for_child(child); // This never returns.
         }
     }
 
-    pub fn enter_chroot(&mut self) -> Result<Option<i32>, Error> {
+    pub fn enter_chroot(&mut self) -> Result<(), Error> {
         let c_proc_self_fd = CString::new("/proc/self/fd").unwrap();
         let proc_self_fd = unsafe { libc::open(c_proc_self_fd.as_ptr(), libc::O_PATH) };
         if proc_self_fd < 0 {
@@ -417,7 +417,7 @@ impl Sandbox {
             return Err(Error::ChrootChdir(std::io::Error::last_os_error()));
         }
 
-        Ok(None)
+        Ok(())
     }
 
     fn drop_supplemental_groups(&self) -> Result<(), Error> {
@@ -436,11 +436,8 @@ impl Sandbox {
         Ok(())
     }
 
-    /// Set up sandbox, fork and jump into it.
-    ///
-    /// On success, the returned value will be the PID of the child for the parent and `None` for
-    /// the child itself, with the latter running isolated in `self.shared_dir`.
-    pub fn enter(&mut self) -> Result<Option<i32>, Error> {
+    /// Set up sandbox,
+    pub fn enter(&mut self) -> Result<(), Error> {
         let uid = unsafe { libc::geteuid() };
         if uid != 0 && self.sandbox_mode != SandboxMode::Namespace {
             return Err(Error::SandboxModeInvalidUID);
@@ -453,7 +450,7 @@ impl Sandbox {
         match self.sandbox_mode {
             SandboxMode::Namespace => self.enter_namespace(),
             SandboxMode::Chroot => self.enter_chroot(),
-            SandboxMode::None => Ok(None),
+            SandboxMode::None => Ok(()),
         }
     }
 
