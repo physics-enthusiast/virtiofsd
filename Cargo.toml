@@ -20,12 +20,12 @@ libc = "~0.2.120"
 log = "0.4"
 libseccomp-sys = "0.2"
 structopt = "0.3"
-vhost-user-backend = "0.5"
+vhost-user-backend = "0.5.1"
 vhost = "0.4"
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"] }
 vm-memory = { version = ">=0.7", features = ["backend-mmap", "backend-atomic"] }
 virtio-queue = "0.4"
-vmm-sys-util = "0.9"
+vmm-sys-util = "0.10"
 syslog = "6.0"
 
 [profile.release]
