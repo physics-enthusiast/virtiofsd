@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use crate::util;
+use crate::{oslib, util};
 use std::ffi::CString;
 use std::fs::{self, File};
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -166,54 +166,25 @@ impl Sandbox {
         let proc_self = unsafe { File::from_raw_fd(proc_self_raw) };
 
         // Ensure our mount changes don't affect the parent mount namespace.
-        let c_root_dir = CString::new("/").unwrap();
-        let ret = unsafe {
-            libc::mount(
-                std::ptr::null(),
-                c_root_dir.as_ptr(),
-                std::ptr::null(),
-                libc::MS_SLAVE | libc::MS_REC,
-                std::ptr::null(),
-            )
-        };
-        if ret != 0 {
-            return Err(Error::CleanMount(std::io::Error::last_os_error()));
-        }
+
+        oslib::mount(None, "/", None, libc::MS_SLAVE | libc::MS_REC).map_err(Error::CleanMount)?;
 
         // Mount `/proc` in this context.
-        let c_proc_dir = CString::new("/proc").unwrap();
-        let c_proc_fs = CString::new("proc").unwrap();
-        let ret = unsafe {
-            libc::mount(
-                c_proc_fs.as_ptr(),
-                c_proc_dir.as_ptr(),
-                c_proc_fs.as_ptr(),
-                libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME,
-                std::ptr::null(),
-            )
-        };
-        if ret != 0 {
-            return Err(Error::MountProc(std::io::Error::last_os_error()));
-        }
+        oslib::mount(
+            "proc".into(),
+            "/proc",
+            "proc".into(),
+            libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME,
+        )
+        .map_err(Error::MountProc)?;
 
         // Bind-mount `/proc/self/fd` onto /proc preventing access to ancestor
         // directories.
-        let c_proc_self_fd = CString::new("/proc/self/fd").unwrap();
-        let c_proc_dir = CString::new("/proc").unwrap();
-        let ret = unsafe {
-            libc::mount(
-                c_proc_self_fd.as_ptr(),
-                c_proc_dir.as_ptr(),
-                std::ptr::null(),
-                libc::MS_BIND,
-                std::ptr::null(),
-            )
-        };
-        if ret < 0 {
-            return Err(Error::BindMountProcSelfFd(std::io::Error::last_os_error()));
-        }
+        oslib::mount("/proc/self/fd".into(), "/proc", None, libc::MS_BIND)
+            .map_err(Error::BindMountProcSelfFd)?;
 
         // Obtain a file descriptor to /proc/self/fd/ by opening bind-mounted /proc directory.
+        let c_proc_dir = CString::new("/proc").unwrap();
         let proc_self_fd = unsafe { libc::open(c_proc_dir.as_ptr(), libc::O_PATH) };
         if proc_self_fd < 0 {
             return Err(Error::OpenProcSelfFd(std::io::Error::last_os_error()));
@@ -222,21 +193,16 @@ impl Sandbox {
         self.proc_self_fd = Some(unsafe { File::from_raw_fd(proc_self_fd) });
 
         // Bind-mount `self.shared_dir` on itself so we can use as new root on `pivot_root` syscall.
-        let c_shared_dir = CString::new(self.shared_dir.clone()).unwrap();
-        let ret = unsafe {
-            libc::mount(
-                c_shared_dir.as_ptr(),
-                c_shared_dir.as_ptr(),
-                std::ptr::null(),
-                libc::MS_BIND | libc::MS_REC,
-                std::ptr::null(),
-            )
-        };
-        if ret < 0 {
-            return Err(Error::BindMountSharedDir(std::io::Error::last_os_error()));
-        }
+        oslib::mount(
+            self.shared_dir.as_str().into(),
+            self.shared_dir.as_str(),
+            None,
+            libc::MS_BIND | libc::MS_REC,
+        )
+        .map_err(Error::BindMountSharedDir)?;
 
         // Get a file descriptor to our old root so we can reference it after switching root.
+        let c_root_dir = CString::new("/").unwrap();
         let oldroot_fd = unsafe {
             libc::open(
                 c_root_dir.as_ptr(),
@@ -248,6 +214,7 @@ impl Sandbox {
         }
 
         // Get a file descriptor to the new root so we can reference it after switching root.
+        let c_shared_dir = CString::new(self.shared_dir.clone()).unwrap();
         let newroot_fd = unsafe {
             libc::open(
                 c_shared_dir.as_ptr(),
@@ -284,25 +251,10 @@ impl Sandbox {
         }
 
         // Clean up old root to avoid mount namespace propagation.
-        let c_empty = CString::new("").unwrap();
-        let ret = unsafe {
-            libc::mount(
-                c_empty.as_ptr(),
-                c_current_dir.as_ptr(),
-                c_empty.as_ptr(),
-                libc::MS_SLAVE | libc::MS_REC,
-                std::ptr::null(),
-            )
-        };
-        if ret != 0 {
-            return Err(Error::CleanMount(std::io::Error::last_os_error()));
-        }
+        oslib::mount(None, ".", None, libc::MS_SLAVE | libc::MS_REC).map_err(Error::CleanMount)?;
 
         // Lazily unmount old root.
-        let ret = unsafe { libc::umount2(c_current_dir.as_ptr(), libc::MNT_DETACH) };
-        if ret < 0 {
-            return Err(Error::UmountOldRoot(std::io::Error::last_os_error()));
-        }
+        oslib::umount2(".", libc::MNT_DETACH).map_err(Error::UmountOldRoot)?;
 
         // Change to new root.
         let ret = unsafe { libc::fchdir(newroot_fd) };
