@@ -514,11 +514,12 @@ unsafe impl ByteValued for virtq_avail {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use virtio_queue::{Queue, QueueState};
-    use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryLoadGuard};
+    use virtio_queue::{Queue, QueueOwnedT, QueueT};
+    use vm_memory::{Bytes, GuestAddress};
 
     const VIRTQ_DESC_F_NEXT: u16 = 0x1;
     const VIRTQ_DESC_F_WRITE: u16 = 0x2;
+    const MAX_QUEUE_SIZE: u16 = 32768;
 
     /// Test utility function to create a descriptor chain in guest memory.
     pub fn create_descriptor_chain(
@@ -527,7 +528,7 @@ mod tests {
         mut buffers_start_addr: GuestAddress,
         descriptors: Vec<(DescriptorType, u32)>,
         spaces_between_regions: u32,
-    ) -> Result<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>> {
+    ) -> Result<DescriptorChain<&GuestMemoryMmap>> {
         let descriptors_len = descriptors.len();
         for (index, (type_, size)) in descriptors.into_iter().enumerate() {
             let mut flags = 0;
@@ -571,11 +572,12 @@ mod tests {
         };
         let _ = memory.write_obj(avail, avail_ring);
 
-        let mut queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueState> =
-            Queue::new(GuestMemoryAtomic::new(memory.clone()), u16::MAX);
-        queue.state.desc_table = descriptor_array_addr;
-        queue.state.avail_ring = avail_ring;
-        let desc = queue.iter().unwrap().next().unwrap();
+        let mut queue: Queue = Queue::new(MAX_QUEUE_SIZE).unwrap();
+        queue
+            .try_set_desc_table_address(descriptor_array_addr)
+            .unwrap();
+        queue.try_set_avail_ring_address(avail_ring).unwrap();
+        let desc = queue.iter(memory).unwrap().next().unwrap();
         Ok(desc.clone())
     }
 
