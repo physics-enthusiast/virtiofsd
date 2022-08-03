@@ -26,7 +26,7 @@ use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
-use virtio_queue::DescriptorChain;
+use virtio_queue::{DescriptorChain, QueueOwnedT};
 use virtiofsd::descriptor_utils::{Error as VufDescriptorError, Reader, Writer};
 use virtiofsd::filesystem::FileSystem;
 use virtiofsd::passthrough::{self, CachePolicy, InodeFileHandlesMode, PassthroughFs};
@@ -204,7 +204,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
         while let Some(avail_desc) = vring
             .get_mut()
             .get_queue_mut()
-            .iter()
+            .iter(atomic_mem.memory())
             .map_err(|_| Error::IterateQueue)?
             .next()
         {
@@ -251,7 +251,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
 
         let avail_chains: Vec<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>> = vring_state
             .get_queue_mut()
-            .iter()
+            .iter(mem.clone())
             .map_err(|_| Error::IterateQueue)?
             .collect();
 
