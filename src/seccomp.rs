@@ -74,12 +74,20 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_close);
     allow_syscall!(ctx, libc::SYS_copy_file_range);
     allow_syscall!(ctx, libc::SYS_dup);
-    #[cfg(any(target_arch = "x86_64", target_arch = "s390x"))]
+    #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "s390x",
+        target_arch = "powerpc64le"
+    ))]
     allow_syscall!(ctx, libc::SYS_epoll_create);
     allow_syscall!(ctx, libc::SYS_epoll_create1);
     allow_syscall!(ctx, libc::SYS_epoll_ctl);
     allow_syscall!(ctx, libc::SYS_epoll_pwait);
-    #[cfg(any(target_arch = "x86_64", target_arch = "s390x"))]
+    #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "s390x",
+        target_arch = "powerpc64le"
+    ))]
     allow_syscall!(ctx, libc::SYS_epoll_wait);
     allow_syscall!(ctx, libc::SYS_eventfd2);
     allow_syscall!(ctx, libc::SYS_exit);
@@ -103,7 +111,11 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_fsync);
     allow_syscall!(ctx, libc::SYS_ftruncate);
     allow_syscall!(ctx, libc::SYS_futex);
-    #[cfg(any(target_arch = "x86_64", target_arch = "s390x"))]
+    #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "s390x",
+        target_arch = "powerpc64le"
+    ))]
     allow_syscall!(ctx, libc::SYS_getdents);
     allow_syscall!(ctx, libc::SYS_getdents64);
     allow_syscall!(ctx, libc::SYS_getegid);
@@ -124,7 +136,11 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_munmap);
     allow_syscall!(ctx, libc::SYS_name_to_handle_at);
     allow_syscall!(ctx, libc::SYS_newfstatat);
-    #[cfg(any(target_arch = "x86_64", target_arch = "s390x"))]
+    #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "s390x",
+        target_arch = "powerpc64le"
+    ))]
     allow_syscall!(ctx, libc::SYS_open);
     allow_syscall!(ctx, libc::SYS_openat);
     allow_syscall!(ctx, libc::SYS_open_by_handle_at);
@@ -160,7 +176,11 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_time); // Rarely needed, except on static builds
     allow_syscall!(ctx, libc::SYS_tgkill);
     allow_syscall!(ctx, libc::SYS_umask);
-    #[cfg(any(target_arch = "x86_64", target_arch = "s390x"))]
+    #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "s390x",
+        target_arch = "powerpc64le"
+    ))]
     allow_syscall!(ctx, libc::SYS_unlink);
     allow_syscall!(ctx, libc::SYS_unlinkat);
     allow_syscall!(ctx, libc::SYS_unshare);
