@@ -1019,9 +1019,6 @@ impl PassthroughFs {
             }
         }
 
-        if filtered.is_empty() {
-            filtered.push(0);
-        }
         filtered.shrink_to_fit();
 
         filtered
