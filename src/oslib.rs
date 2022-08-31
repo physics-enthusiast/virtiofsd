@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::io::{Error, Result};
+use std::os::unix::io::RawFd;
 
 // A helper function that check the return value of a C function call
 // and wraps it in a `Result` type, returning the `errno` code as `Err`.
@@ -54,5 +55,16 @@ pub fn umount2(target: &str, flags: i32) -> Result<()> {
 
     // Safety: `target` is a valid C string pointer
     check_retval(unsafe { libc::umount2(target, flags) })?;
+    Ok(())
+}
+
+/// Safe wrapper for `fchdir(2)`
+///
+/// # Errors
+///
+/// Will return `Err(errno)` if `fchdir(2)` fails.
+/// Each filesystem type may have its own special errors, see `fchdir(2)` for details.
+pub fn fchdir(fd: RawFd) -> Result<()> {
+    check_retval(unsafe { libc::fchdir(fd) })?;
     Ok(())
 }

@@ -226,10 +226,7 @@ impl Sandbox {
         }
 
         // Change to new root directory to prepare for `pivot_root` syscall.
-        let ret = unsafe { libc::fchdir(newroot_fd) };
-        if ret < 0 {
-            return Err(Error::ChdirNewRoot(std::io::Error::last_os_error()));
-        }
+        oslib::fchdir(newroot_fd).map_err(Error::ChdirNewRoot)?;
 
         // Call to `pivot_root` using `.` as both new and old root.
         let c_current_dir = CString::new(".").unwrap();
@@ -245,10 +242,7 @@ impl Sandbox {
         }
 
         // Change to old root directory to prepare for cleaning up and unmounting it.
-        let ret = unsafe { libc::fchdir(oldroot_fd) };
-        if ret < 0 {
-            return Err(Error::ChdirOldRoot(std::io::Error::last_os_error()));
-        }
+        oslib::fchdir(oldroot_fd).map_err(Error::ChdirOldRoot)?;
 
         // Clean up old root to avoid mount namespace propagation.
         oslib::mount(None, ".", None, libc::MS_SLAVE | libc::MS_REC).map_err(Error::CleanMount)?;
@@ -257,10 +251,7 @@ impl Sandbox {
         oslib::umount2(".", libc::MNT_DETACH).map_err(Error::UmountOldRoot)?;
 
         // Change to new root.
-        let ret = unsafe { libc::fchdir(newroot_fd) };
-        if ret < 0 {
-            return Err(Error::ChdirNewRoot(std::io::Error::last_os_error()));
-        }
+        oslib::fchdir(newroot_fd).map_err(Error::ChdirNewRoot)?;
 
         // We no longer need these file descriptors, so close them.
         unsafe { libc::close(newroot_fd) };

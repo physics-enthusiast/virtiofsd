@@ -14,10 +14,10 @@ use crate::filesystem::{
     Context, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions, SecContext,
     SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
 };
-use crate::fuse;
 use crate::passthrough::inode_store::{Inode, InodeData, InodeFile, InodeIds, InodeStore};
 use crate::passthrough::util::{ebadf, einval, is_safe_inode, openat, reopen_fd_through_proc};
 use crate::read_dir::ReadDir;
+use crate::{fuse, oslib};
 use file_handle::{FileHandle, FileOrHandle, OpenableFileHandle};
 use mount_fd::{MPRError, MountFds};
 use stat::{statx, StatExt};
@@ -192,6 +192,27 @@ impl Drop for ScopedUmask {
 
 fn set_umask(umask: u32) -> io::Result<Option<ScopedUmask>> {
     ScopedUmask::new(umask)
+}
+
+struct ScopedWorkingDirectory {
+    back_to: RawFd,
+}
+
+impl ScopedWorkingDirectory {
+    fn new(new_wd: RawFd, old_wd: RawFd) -> ScopedWorkingDirectory {
+        oslib::fchdir(new_wd).expect("the working directory should be changed");
+        ScopedWorkingDirectory { back_to: old_wd }
+    }
+}
+
+impl Drop for ScopedWorkingDirectory {
+    fn drop(&mut self) {
+        oslib::fchdir(self.back_to).expect("the working directory should be changed");
+    }
+}
+
+fn set_working_directory(new_wd: RawFd, old_wd: RawFd) -> ScopedWorkingDirectory {
+    ScopedWorkingDirectory::new(new_wd, old_wd)
 }
 
 /// The caching policy that the file system should report to the FUSE client. By default the FUSE
@@ -1140,8 +1161,9 @@ impl PassthroughFs {
             }
         };
 
-        let err = unsafe { libc::fchdir(self.proc_self_fd.as_raw_fd()) };
-        assert!(err == 0);
+        let _working_dir_guard =
+            set_working_directory(self.proc_self_fd.as_raw_fd(), self.root_fd.as_raw_fd());
+
         let res = unsafe {
             libc::setxattr(
                 procname.as_ptr(),
@@ -1153,9 +1175,6 @@ impl PassthroughFs {
         };
 
         let res_err = io::Error::last_os_error();
-
-        let err = unsafe { libc::fchdir(self.root_fd.as_raw_fd()) };
-        assert!(err == 0);
 
         if res == 0 {
             Ok(())
@@ -2174,11 +2193,11 @@ impl FileSystem for PassthroughFs {
             let procname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let err = unsafe { libc::fchdir(self.proc_self_fd.as_raw_fd()) };
-            assert!(err == 0);
+            let _working_dir_guard =
+                set_working_directory(self.proc_self_fd.as_raw_fd(), self.root_fd.as_raw_fd());
 
             // Safe because this doesn't modify any memory and we check the return value.
-            let res = unsafe {
+            unsafe {
                 libc::setxattr(
                     procname.as_ptr(),
                     name.as_ptr(),
@@ -2186,12 +2205,7 @@ impl FileSystem for PassthroughFs {
                     value.len(),
                     flags as libc::c_int,
                 )
-            };
-
-            let err = unsafe { libc::fchdir(self.root_fd.as_raw_fd()) };
-            assert!(err == 0);
-
-            res
+            }
         };
         if res == 0 {
             Ok(())
@@ -2249,23 +2263,18 @@ impl FileSystem for PassthroughFs {
             let procname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let err = unsafe { libc::fchdir(self.proc_self_fd.as_raw_fd()) };
-            assert!(err == 0);
+            let _working_dir_guard =
+                set_working_directory(self.proc_self_fd.as_raw_fd(), self.root_fd.as_raw_fd());
 
             // Safe because this will only modify the contents of `buf`.
-            let res = unsafe {
+            unsafe {
                 libc::getxattr(
                     procname.as_ptr(),
                     name.as_ptr(),
                     buf.as_mut_ptr() as *mut libc::c_void,
                     size as libc::size_t,
                 )
-            };
-
-            let err = unsafe { libc::fchdir(self.root_fd.as_raw_fd()) };
-            assert!(err == 0);
-
-            res
+            }
         };
         if res < 0 {
             return Err(io::Error::last_os_error());
@@ -2313,21 +2322,17 @@ impl FileSystem for PassthroughFs {
             let procname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let err = unsafe { libc::fchdir(self.proc_self_fd.as_raw_fd()) };
-            assert!(err == 0);
+            let _working_dir_guard =
+                set_working_directory(self.proc_self_fd.as_raw_fd(), self.root_fd.as_raw_fd());
 
             // Safe because this will only modify the contents of `buf`.
-            let res = unsafe {
+            unsafe {
                 libc::listxattr(
                     procname.as_ptr(),
                     buf.as_mut_ptr() as *mut libc::c_char,
                     size as libc::size_t,
                 )
-            };
-            let err = unsafe { libc::fchdir(self.root_fd.as_raw_fd()) };
-            assert!(err == 0);
-
-            res
+            }
         };
         if res < 0 {
             return Err(io::Error::last_os_error());
@@ -2370,16 +2375,11 @@ impl FileSystem for PassthroughFs {
             let procname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let err = unsafe { libc::fchdir(self.proc_self_fd.as_raw_fd()) };
-            assert!(err == 0);
+            let _working_dir_guard =
+                set_working_directory(self.proc_self_fd.as_raw_fd(), self.root_fd.as_raw_fd());
 
             // Safe because this doesn't modify any memory and we check the return value.
-            let res = unsafe { libc::removexattr(procname.as_ptr(), name.as_ptr()) };
-
-            let err = unsafe { libc::fchdir(self.root_fd.as_raw_fd()) };
-            assert!(err == 0);
-
-            res
+            unsafe { libc::removexattr(procname.as_ptr(), name.as_ptr()) }
         };
 
         if res == 0 {
