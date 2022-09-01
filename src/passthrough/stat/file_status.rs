@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+
 #[cfg(target_env = "gnu")]
 pub use libc::statx as statx_st;
 
