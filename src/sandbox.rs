@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use crate::{oslib, util};
+use crate::{idmap, oslib, util};
+use idmap::{GidMap, IdMapSetUpPipeMessage, UidMap};
 use std::ffi::CString;
 use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::process::{self, Command};
 use std::str::FromStr;
 use std::{error, fmt, io};
 
@@ -63,21 +66,28 @@ pub enum Error {
     UmountTempDir(io::Error),
     /// Call to libc::unshare returned an error.
     Unshare(io::Error),
-    /// Failed to write to `/proc/self/gid_map`.
-    WriteGidMap(io::Error),
+    /// Failed to execute `newgidmap(1)`.
+    WriteGidMap(String),
     /// Failed to write to `/proc/self/setgroups`.
     WriteSetGroups(io::Error),
-    /// Failed to write to `/proc/self/uid_map`.
-    WriteUidMap(io::Error),
+    /// Failed to execute `newuidmap(1)`.
+    WriteUidMap(String),
     /// Sandbox mode unavailable for non-privileged users
     SandboxModeInvalidUID,
+    /// Setting uid_map is only allowed inside a namespace for non-privileged users
+    SandboxModeInvalidUidMap,
+    /// Setting gid_map is only allowed inside a namespace for non-privileged users
+    SandboxModeInvalidGidMap,
 }
 
 impl error::Error for Error {}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use self::Error::SandboxModeInvalidUID;
+        use self::Error::{
+            SandboxModeInvalidGidMap, SandboxModeInvalidUID, SandboxModeInvalidUidMap, WriteGidMap,
+            WriteUidMap,
+        };
         match self {
             SandboxModeInvalidUID => {
                 write!(
@@ -86,6 +96,22 @@ impl fmt::Display for Error {
                     root (Use '--sandbox namespace' instead)"
                 )
             }
+            SandboxModeInvalidUidMap => {
+                write!(
+                    f,
+                    "uid_map can only be used by unprivileged user where sandbox mod is namespace \
+                    (Use '--sandbox namespace' instead)"
+                )
+            }
+            SandboxModeInvalidGidMap => {
+                write!(
+                    f,
+                    "gid_map can only be used by unprivileged user where sandbox mod is namespace \
+                    (Use '--sandbox namespace' instead)"
+                )
+            }
+            WriteUidMap(msg) => write!(f, "write to uid map failed: {msg}"),
+            WriteGidMap(msg) => write!(f, "write to gid map failed: {msg}"),
             _ => write!(f, "{self:?}"),
         }
     }
@@ -125,10 +151,19 @@ pub struct Sandbox {
     mountinfo_fd: Option<File>,
     /// Mechanism to be used for setting up the sandbox.
     sandbox_mode: SandboxMode,
+    /// UidMap to be used for `newuidmap(1)` command line arguments
+    uid_map: Option<UidMap>,
+    /// GidMap to be used for `newgidmap(1)` command line arguments
+    gid_map: Option<GidMap>,
 }
 
 impl Sandbox {
-    pub fn new(shared_dir: String, sandbox_mode: SandboxMode) -> io::Result<Self> {
+    pub fn new(
+        shared_dir: String,
+        sandbox_mode: SandboxMode,
+        uid_map: Option<UidMap>,
+        gid_map: Option<GidMap>,
+    ) -> io::Result<Self> {
         let shared_dir_rp = fs::canonicalize(shared_dir)?;
         let shared_dir_rp_str = shared_dir_rp
             .to_str()
@@ -139,6 +174,8 @@ impl Sandbox {
             proc_self_fd: None,
             mountinfo_fd: None,
             sandbox_mode,
+            uid_map,
+            gid_map,
         })
     }
 
@@ -270,49 +307,159 @@ impl Sandbox {
         Ok(())
     }
 
-    /// Sets 1-to-1 mappings for the current uid and gid.
-    fn setup_id_mappings(&self, uid: u32, gid: u32) -> Result<(), Error> {
-        // To be able to set up the gid mapping, we're required to disable setgroups(2) first.
-        fs::write("/proc/self/setgroups", "deny\n").map_err(Error::WriteSetGroups)?;
+    /// Sets mappings for the given uid and gid.
+    fn setup_id_mappings(
+        &self,
+        uid_map: Option<&UidMap>,
+        gid_map: Option<&GidMap>,
+        pid: i32,
+    ) -> Result<(), Error> {
+        // Unprivileged user can not set any mapping without any restriction.
+        // Therefore, newuidmap/newgidmap is used instead of writing directly
+        // into proc/[pid]/{uid,gid}_map.
+        let mut newuidmap = Command::new("newuidmap");
+        newuidmap.arg(pid.to_string());
+        if let Some(uid_map) = uid_map {
+            newuidmap.arg(uid_map.inside_uid.to_string());
+            newuidmap.arg(uid_map.outside_uid.to_string());
+            newuidmap.arg(uid_map.count.to_string());
+        } else {
+            // Set up 1-to-1 mappings for our current uid.
+            let current_uid = unsafe { libc::geteuid() };
+            newuidmap.arg(current_uid.to_string());
+            newuidmap.arg(current_uid.to_string());
+            newuidmap.arg("1");
+        }
+        let mut output = newuidmap.output().map_err(|_| {
+            Error::WriteUidMap(format!(
+                "failed to execute newuidmap: {}",
+                io::Error::last_os_error()
+            ))
+        })?;
+        if !output.status.success() {
+            return Err(Error::WriteUidMap(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
 
-        // Set up 1-to-1 mappings for our uid and gid.
-        let uid_mapping = format!("{uid} {uid} 1\n");
-        fs::write("/proc/self/uid_map", uid_mapping).map_err(Error::WriteUidMap)?;
-
-        let gid_mapping = format!("{gid} {gid} 1\n");
-        fs::write("/proc/self/gid_map", gid_mapping).map_err(Error::WriteGidMap)?;
+        let mut newgidmap = Command::new("newgidmap");
+        newgidmap.arg(pid.to_string());
+        if let Some(gid_map) = gid_map {
+            newgidmap.arg(gid_map.inside_gid.to_string());
+            newgidmap.arg(gid_map.outside_gid.to_string());
+            newgidmap.arg(gid_map.count.to_string());
+        } else {
+            // Set up 1-to-1 mappings for our current gid.
+            let current_gid = unsafe { libc::getegid() };
+            newgidmap.arg(current_gid.to_string());
+            newgidmap.arg(current_gid.to_string());
+            newgidmap.arg("1");
+        }
+        output = newgidmap.output().map_err(|_| {
+            Error::WriteGidMap(format!(
+                "failed to execute newgidmap: {}",
+                io::Error::last_os_error()
+            ))
+        })?;
+        if !output.status.success() {
+            return Err(Error::WriteGidMap(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
         Ok(())
     }
 
     pub fn enter_namespace(&mut self) -> Result<(), Error> {
         let uid = unsafe { libc::geteuid() };
-        let gid = unsafe { libc::getegid() };
 
         let flags = if uid == 0 {
             libc::CLONE_NEWPID | libc::CLONE_NEWNS | libc::CLONE_NEWNET
         } else {
-            // If running as an unprivileged user, rely on user_namespaces(7) for isolation. The
-            // main limitation of this strategy is that only the current uid/gid are mapped into
-            // the new namespace, so most operations on permissions will fail.
+            // If running as an unprivileged user, rely on user_namespaces(7) for isolation.
             libc::CLONE_NEWPID | libc::CLONE_NEWNS | libc::CLONE_NEWNET | libc::CLONE_NEWUSER
         };
 
-        let ret = unsafe { libc::unshare(flags) };
-        if ret != 0 {
-            return Err(Error::Unshare(std::io::Error::last_os_error()));
-        }
+        let (mut x_reader, mut x_writer) = oslib::pipe().unwrap();
+        let (mut y_reader, mut y_writer) = oslib::pipe().unwrap();
 
-        let child = util::sfork().map_err(Error::Fork)?;
-        if child == 0 {
-            // This is the child.
+        let pid = util::sfork().map_err(Error::Fork)?;
+        let mut output = [0];
+
+        // First child is only responsible to setup id mapping
+        // from outside of the main thread's namespace.
+        // Pipe is used for synchronization between the main thread and the first child.
+        // That will guarantee the mapping is done before the main thread gets running.
+        if pid == 0 {
+            // First child
+            // Dropping the other end of the pipes
+            drop(x_writer);
+            drop(y_reader);
+
+            // This is waiting until unshare() returns
+            x_reader.read_exact(&mut output).unwrap();
+            assert_eq!(output[0], IdMapSetUpPipeMessage::Request as u8);
+
+            // Setup uid/gid mappings
             if uid != 0 {
-                self.setup_id_mappings(uid, gid)?;
+                let ppid = unsafe { libc::getppid() };
+                if let Err(why) =
+                    self.setup_id_mappings(self.uid_map.as_ref(), self.gid_map.as_ref(), ppid)
+                {
+                    panic!("couldn't setup id mappings: {}", why)
+                };
             }
-            self.setup_mounts()?;
-            Ok(())
+
+            // Signal that mapping is done
+            y_writer
+                .write_all(&[IdMapSetUpPipeMessage::Done as u8])
+                .unwrap_or_else(|_| process::exit(1));
+
+            // Terminate this child
+            process::exit(0);
         } else {
-            // This is the parent.
-            util::wait_for_child(child); // This never returns.
+            // This is the parent
+            let ret = unsafe { libc::unshare(flags) };
+            if ret != 0 {
+                return Err(Error::Unshare(std::io::Error::last_os_error()));
+            }
+
+            // Dropping the other end of the pipes
+            drop(x_reader);
+            drop(y_writer);
+
+            // Signal the first child to go ahead and setup the id mappings
+            x_writer
+                .write_all(&[IdMapSetUpPipeMessage::Request as u8])
+                .unwrap();
+
+            // Receive the signal that mapping is done
+            y_reader
+                .read_exact(&mut output)
+                .unwrap_or_else(|_| process::exit(1));
+            assert_eq!(output[0], IdMapSetUpPipeMessage::Done as u8);
+
+            let mut status = 0_i32;
+            let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
+
+            // Set the process inside the user namespace as root
+            let mut ret = unsafe { libc::setresuid(0, 0, 0) };
+            if ret != 0 {
+                warn!("Couldn't set the process uid as root: {}", ret);
+            }
+            ret = unsafe { libc::setresgid(0, 0, 0) };
+            if ret != 0 {
+                warn!("Couldn't set the process gid as root: {}", ret);
+            }
+
+            let child = util::sfork().map_err(Error::Fork)?;
+            if child == 0 {
+                // Second child
+                self.setup_mounts()?;
+                Ok(())
+            } else {
+                // This is the parent
+                util::wait_for_child(child); // This never returns.
+            }
         }
     }
 
@@ -369,6 +516,14 @@ impl Sandbox {
         let uid = unsafe { libc::geteuid() };
         if uid != 0 && self.sandbox_mode == SandboxMode::Chroot {
             return Err(Error::SandboxModeInvalidUID);
+        }
+
+        if self.uid_map.is_some() && (uid == 0 || self.sandbox_mode != SandboxMode::Namespace) {
+            return Err(Error::SandboxModeInvalidUidMap);
+        }
+
+        if self.gid_map.is_some() && (uid == 0 || self.sandbox_mode != SandboxMode::Namespace) {
+            return Err(Error::SandboxModeInvalidGidMap);
         }
 
         // Drop supplemental groups. This is running as root and will

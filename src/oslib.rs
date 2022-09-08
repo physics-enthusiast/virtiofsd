@@ -2,8 +2,10 @@
 
 use bitflags::bitflags;
 use std::ffi::{CStr, CString};
-use std::io::{Error, Result};
+use std::fs::File;
+use std::io::{self, Error, Result};
 use std::os::unix::io::{AsRawFd, BorrowedFd, RawFd};
+use std::os::unix::prelude::FromRawFd;
 
 // A helper function that check the return value of a C function call
 // and wraps it in a `Result` type, returning the `errno` code as `Err`.
@@ -318,4 +320,37 @@ pub fn writev_at(
         )
     })?;
     Ok(bytes_written as usize)
+}
+
+pub struct PipeReader(File);
+
+impl io::Read for PipeReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+pub struct PipeWriter(File);
+
+impl io::Write for PipeWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+pub fn pipe() -> io::Result<(PipeReader, PipeWriter)> {
+    let mut fds: [RawFd; 2] = [-1, -1];
+    let ret = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+    if ret == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok((
+            PipeReader(unsafe { File::from_raw_fd(fds[0]) }),
+            PipeWriter(unsafe { File::from_raw_fd(fds[1]) }),
+        ))
+    }
 }
