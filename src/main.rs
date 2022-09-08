@@ -978,7 +978,12 @@ fn main() {
         _ => enable_seccomp(opt.seccomp, opt.syslog).unwrap(),
     }
 
-    drop_capabilities(fs_cfg.inode_file_handles, opt.modcaps);
+    // We don't modify the capabilities if the user call us without
+    // any sandbox (i.e. --sandbox=none) as unprivileged user
+    let uid = unsafe { libc::geteuid() };
+    if uid == 0 {
+        drop_capabilities(fs_cfg.inode_file_handles, opt.modcaps);
+    }
 
     let fs = match PassthroughFs::new(fs_cfg) {
         Ok(fs) => fs,
