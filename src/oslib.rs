@@ -77,9 +77,10 @@ pub struct ScopedUmask {
 }
 
 impl ScopedUmask {
-    pub fn new(new_umask: u32) -> Result<Option<Self>> {
-        let umask = unsafe { libc::umask(new_umask) };
-        Ok(Some(Self { umask }))
+    pub fn new(new_umask: u32) -> Self {
+        Self {
+            umask: unsafe { libc::umask(new_umask) },
+        }
     }
 }
 
