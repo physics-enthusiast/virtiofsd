@@ -69,6 +69,13 @@ pub fn fchdir(fd: RawFd) -> Result<()> {
     Ok(())
 }
 
+/// Safe wrapper for `umask(2)`
+pub fn umask(mask: u32) -> u32 {
+    // SAFETY: this call doesn't modify any memory and there is no need
+    // to check the return value because this system call always succeeds.
+    unsafe { libc::umask(mask) }
+}
+
 /// An RAII implementation of a scoped file mode creation mask (umask), it set the
 /// new umask. When this structure is dropped (falls out of scope), it set the previous
 /// value of the mask.
@@ -79,13 +86,13 @@ pub struct ScopedUmask {
 impl ScopedUmask {
     pub fn new(new_umask: u32) -> Self {
         Self {
-            umask: unsafe { libc::umask(new_umask) },
+            umask: umask(new_umask),
         }
     }
 }
 
 impl Drop for ScopedUmask {
     fn drop(&mut self) {
-        unsafe { libc::umask(self.umask) };
+        umask(self.umask);
     }
 }

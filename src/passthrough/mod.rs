@@ -510,10 +510,9 @@ impl PassthroughFs {
 
         fs.check_working_file_handles()?;
 
-        // Safe because this doesn't modify any memory and there is no need to check the return
-        // value because this system call always succeeds. We need to clear the umask here because
-        // we want the client to be able to set all the bits in the mode.
-        unsafe { libc::umask(0o000) };
+        // We need to clear the umask here because we want the client to be
+        // able to set all the bits in the mode.
+        oslib::umask(0o000);
 
         Ok(fs)
     }
