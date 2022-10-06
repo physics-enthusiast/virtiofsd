@@ -68,3 +68,23 @@ pub fn fchdir(fd: RawFd) -> Result<()> {
     check_retval(unsafe { libc::fchdir(fd) })?;
     Ok(())
 }
+
+/// An RAII implementation of a scoped file mode creation mask (umask), it set the
+/// new umask. When this structure is dropped (falls out of scope), it set the previous
+/// value of the mask.
+pub struct ScopedUmask {
+    umask: libc::mode_t,
+}
+
+impl ScopedUmask {
+    pub fn new(new_umask: u32) -> Result<Option<Self>> {
+        let umask = unsafe { libc::umask(new_umask) };
+        Ok(Some(Self { umask }))
+    }
+}
+
+impl Drop for ScopedUmask {
+    fn drop(&mut self) {
+        unsafe { libc::umask(self.umask) };
+    }
+}

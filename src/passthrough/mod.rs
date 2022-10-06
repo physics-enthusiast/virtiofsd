@@ -173,25 +173,8 @@ fn drop_effective_cap(cap_name: &str) -> io::Result<Option<ScopedCaps>> {
     ScopedCaps::new(cap_name)
 }
 
-struct ScopedUmask {
-    umask: libc::mode_t,
-}
-
-impl ScopedUmask {
-    fn new(new_umask: u32) -> io::Result<Option<Self>> {
-        let umask = unsafe { libc::umask(new_umask) };
-        Ok(Some(Self { umask }))
-    }
-}
-
-impl Drop for ScopedUmask {
-    fn drop(&mut self) {
-        unsafe { libc::umask(self.umask) };
-    }
-}
-
-fn set_umask(umask: u32) -> io::Result<Option<ScopedUmask>> {
-    ScopedUmask::new(umask)
+fn set_umask(umask: u32) -> io::Result<Option<oslib::ScopedUmask>> {
+    oslib::ScopedUmask::new(umask)
 }
 
 struct ScopedWorkingDirectory {
