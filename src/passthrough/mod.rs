@@ -2135,7 +2135,22 @@ impl FileSystem for PassthroughFs {
             && extra_flags.contains(SetxattrFlags::SETXATTR_ACL_KILL_SGID)
             && xattr_name.eq("system.posix_acl_access")
         {
-            (drop_effective_cap("FSETID")?, set_creds(ctx.uid, ctx.gid)?)
+            let cap_guard = drop_effective_cap("FSETID")?;
+            let creds_guard = set_creds(ctx.uid, ctx.gid)?;
+
+            // If `set_creds()` changes the effective user ID to non-zero, then the effective set is
+            // cleared from all capabilities. When switching back to root the permitted set is
+            // copied to the effective set. We need to keep `DAC_READ_SEARCH` to use file handles.
+            if self.cfg.inode_file_handles != InodeFileHandlesMode::Never {
+                if let Err(e) = crate::util::add_cap_to_eff("DAC_READ_SEARCH") {
+                    warn!(
+                        "failed to add 'DAC_READ_SEARCH' to the effective set of capabilities: {}",
+                        e
+                    );
+                }
+            }
+
+            (cap_guard, creds_guard)
         } else {
             (None, (None, None))
         };
