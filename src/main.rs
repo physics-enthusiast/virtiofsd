@@ -34,7 +34,7 @@ use virtiofsd::sandbox::{Sandbox, SandboxMode};
 use virtiofsd::seccomp::{enable_seccomp, SeccompAction};
 use virtiofsd::server::Server;
 use virtiofsd::util::write_pid_file;
-use virtiofsd::{limits, Error as VhostUserFsError};
+use virtiofsd::{limits, oslib, Error as VhostUserFsError};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::EventFd;
@@ -890,7 +890,7 @@ fn main() {
         Some(fd) => unsafe { (Listener::from_raw_fd(*fd), None, None) },
         None => {
             // Set umask to ensure the socket is created with the right permissions
-            let old_umask = unsafe { libc::umask(umask) };
+            let _umask_guard = oslib::ScopedUmask::new(umask);
 
             let socket = opt.socket_path.as_ref().unwrap_or_else(|| {
                 warn!("use of deprecated parameter '--socket': Please use the '--socket-path' option instead");
@@ -908,9 +908,6 @@ fn main() {
                 error!("Error creating listener: {}", error);
                 process::exit(1);
             });
-
-            // Restore umask
-            unsafe { libc::umask(old_umask) };
 
             (listener, Some(socket.clone()), Some(pid_file))
         }

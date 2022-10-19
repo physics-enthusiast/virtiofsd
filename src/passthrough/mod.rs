@@ -173,27 +173,6 @@ fn drop_effective_cap(cap_name: &str) -> io::Result<Option<ScopedCaps>> {
     ScopedCaps::new(cap_name)
 }
 
-struct ScopedUmask {
-    umask: libc::mode_t,
-}
-
-impl ScopedUmask {
-    fn new(new_umask: u32) -> io::Result<Option<Self>> {
-        let umask = unsafe { libc::umask(new_umask) };
-        Ok(Some(Self { umask }))
-    }
-}
-
-impl Drop for ScopedUmask {
-    fn drop(&mut self) {
-        unsafe { libc::umask(self.umask) };
-    }
-}
-
-fn set_umask(umask: u32) -> io::Result<Option<ScopedUmask>> {
-    ScopedUmask::new(umask)
-}
-
 struct ScopedWorkingDirectory {
     back_to: RawFd,
 }
@@ -531,10 +510,9 @@ impl PassthroughFs {
 
         fs.check_working_file_handles()?;
 
-        // Safe because this doesn't modify any memory and there is no need to check the return
-        // value because this system call always succeeds. We need to clear the umask here because
-        // we want the client to be able to set all the bits in the mode.
-        unsafe { libc::umask(0o000) };
+        // We need to clear the umask here because we want the client to be
+        // able to set all the bits in the mode.
+        oslib::umask(0o000);
 
         Ok(fs)
     }
@@ -1059,11 +1037,10 @@ impl PassthroughFs {
     ) -> io::Result<RawFd> {
         let fd = {
             let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
-            let _umask_guard = if self.posix_acl.load(Ordering::Relaxed) {
-                set_umask(umask)?
-            } else {
-                None
-            };
+            let _umask_guard = self
+                .posix_acl
+                .load(Ordering::Relaxed)
+                .then(|| oslib::ScopedUmask::new(umask));
 
             // Safe because this doesn't modify any memory and we check the return value. We don't
             // really check `flags` because if the kernel can't handle poorly specified flags then we
@@ -1391,11 +1368,10 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
-            let _umask_guard = if self.posix_acl.load(Ordering::Relaxed) {
-                set_umask(umask)?
-            } else {
-                None
-            };
+            let _umask_guard = self
+                .posix_acl
+                .load(Ordering::Relaxed)
+                .then(|| oslib::ScopedUmask::new(umask));
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::mkdirat(parent_file.as_raw_fd(), name.as_ptr(), mode) }
@@ -1864,11 +1840,10 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
-            let _umask_guard = if self.posix_acl.load(Ordering::Relaxed) {
-                set_umask(umask)?
-            } else {
-                None
-            };
+            let _umask_guard = self
+                .posix_acl
+                .load(Ordering::Relaxed)
+                .then(|| oslib::ScopedUmask::new(umask));
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe {
