@@ -115,6 +115,7 @@ this may lead to data loss/corruption.
 ```
 Disable `KILLPRIV V2` support.
 This is required if the shared directory is an NFS file system.
+`KILLPRIV V2` support is disabled by default.
 
 ```shell
 --killpriv-v2
@@ -139,7 +140,7 @@ Enable support for extended attributes.
 ```shell
 --posix-acl
 ```
-Enable support for posix ACLs (implies --xattr)
+Enable support for posix ACLs (implies --xattr).
 
 ```shell
 --security-label

@@ -594,7 +594,7 @@ struct Opt {
     #[structopt(short = "d")]
     compat_debug: bool,
 
-    /// Disable KILLPRIV V2 support
+    /// Disable KILLPRIV V2 support [default]
     #[structopt(long)]
     _no_killpriv_v2: bool,
 
