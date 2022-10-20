@@ -103,7 +103,22 @@ fn set_creds(
 ) -> io::Result<(Option<ScopedUid>, Option<ScopedGid>)> {
     // We have to change the gid before we change the uid because if we change the uid first then we
     // lose the capability to change the gid.  However changing back can happen in any order.
-    ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)))
+    let creds_guard = ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)));
+
+    // We don't have access to process supplementary groups. To work around this
+    // we can set the `DAC_OVERRIDE` in the effective set. We are allowed to set
+    // the capability because `set_creds()` only changes the effective user ID,
+    // so we still have the 'DAC_OVERRIDE' in the permitted set. After switching
+    // back to root the permitted set is copied to the effective set, so no additional
+    // steps are required.
+    if let Err(e) = crate::util::add_cap_to_eff("DAC_OVERRIDE") {
+        warn!(
+            "failed to add 'DAC_OVERRIDE' to the effective set of capabilities: {}",
+            e
+        );
+    }
+
+    creds_guard
 }
 
 struct ScopedCaps {
