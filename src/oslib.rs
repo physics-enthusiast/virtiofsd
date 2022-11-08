@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::ffi::CString;
 use std::io::{Error, Result};
 use std::os::unix::io::RawFd;
