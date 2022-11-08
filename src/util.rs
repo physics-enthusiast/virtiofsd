@@ -136,3 +136,29 @@ pub fn wait_for_child(pid: i32) -> ! {
 
     process::exit(exit_code);
 }
+
+/// Add a capability to the effective set
+/// # Errors
+/// An error variant will be returned:
+/// - if the input string does not match the name, without the 'CAP_' prefix,
+/// of any of the capability defined in `linux/capabiliy.h`.
+/// - if `capng::get_caps_process()` cannot get  the  capabilities  and bounding set of the process.
+/// - if `capng::update()` fails to update the internal posix capabilities settings.
+/// - if `capng::apply()` fails to transfer the specified internal posix capabilities
+///   settings to the kernel.
+pub fn add_cap_to_eff(cap_name: &str) -> capng::Result<()> {
+    use capng::{Action, CUpdate, Set, Type};
+    let cap = capng::name_to_capability(cap_name)?;
+    capng::get_caps_process()?;
+
+    let req = vec![CUpdate {
+        action: Action::ADD,
+        cap_type: Type::EFFECTIVE,
+        capability: cap,
+    }];
+
+    capng::update(req)?;
+    capng::apply(Set::CAPS)?;
+
+    Ok(())
+}
