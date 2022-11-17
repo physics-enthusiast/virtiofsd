@@ -265,8 +265,9 @@ impl<'a> Reader<'a> {
         count: usize,
         off: u64,
     ) -> io::Result<usize> {
-        self.buffer
-            .consume(count, |bufs| dst.write_vectored_at_volatile(bufs, off))
+        self.buffer.consume(count, |bufs| {
+            dst.write_vectored_at_volatile(bufs, off, None)
+        })
     }
 
     pub fn read_exact_to<F: FileReadWriteVolatile>(

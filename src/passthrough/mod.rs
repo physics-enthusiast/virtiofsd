@@ -1590,7 +1590,7 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<usize> {
         let data = self.find_handle(handle, inode)?;
 
-        // This is safe because read_to uses pwritev64, so the underlying file descriptor
+        // This is safe because read_to uses `pwritev2(2)`, so the underlying file descriptor
         // offset is not affected by this operation.
         let f = data.file.read().unwrap();
 

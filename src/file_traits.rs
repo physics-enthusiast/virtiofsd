@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Result};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsFd, AsRawFd};
 
 use vm_memory::VolatileSlice;
 
+use crate::oslib;
 use libc::{
-    c_int, c_void, off64_t, pread64, preadv64, pwrite64, pwritev64, read, readv, size_t, write,
-    writev,
+    c_int, c_void, off64_t, pread64, preadv64, pwrite64, read, readv, size_t, write, writev,
 };
 
 /// A trait for setting the size of a file.
@@ -165,13 +166,12 @@ pub trait FileReadWriteAtVolatile {
     /// consumed. This method must behave as a call to `write_at_volatile` with the buffers
     /// concatenated would. The default implementation calls `write_at_volatile` with either the
     /// first nonempty buffer provided, or returns `Ok(0)` if none exists.
-    fn write_vectored_at_volatile(&self, bufs: &[VolatileSlice], offset: u64) -> Result<usize> {
-        if let Some(&slice) = bufs.first() {
-            self.write_at_volatile(slice, offset)
-        } else {
-            Ok(0)
-        }
-    }
+    fn write_vectored_at_volatile(
+        &self,
+        bufs: &[VolatileSlice],
+        offset: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> Result<usize>;
 
     /// Writes bytes from this file at `offset` into the given slice until all bytes in the slice
     /// are written, or an error is returned.
@@ -208,8 +208,13 @@ impl<'a, T: FileReadWriteAtVolatile + ?Sized> FileReadWriteAtVolatile for &'a T 
         (**self).write_at_volatile(slice, offset)
     }
 
-    fn write_vectored_at_volatile(&self, bufs: &[VolatileSlice], offset: u64) -> Result<usize> {
-        (**self).write_vectored_at_volatile(bufs, offset)
+    fn write_vectored_at_volatile(
+        &self,
+        bufs: &[VolatileSlice],
+        offset: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> Result<usize> {
+        (**self).write_vectored_at_volatile(bufs, offset, flags)
     }
 
     fn write_all_at_volatile(&self, slice: VolatileSlice, offset: u64) -> Result<()> {
@@ -373,6 +378,7 @@ macro_rules! volatile_impl {
                 &self,
                 bufs: &[VolatileSlice],
                 offset: u64,
+                flags: Option<oslib::WritevFlags>,
             ) -> Result<usize> {
                 let iovecs: Vec<libc::iovec> = bufs
                     .iter()
@@ -386,21 +392,12 @@ macro_rules! volatile_impl {
                     return Ok(0);
                 }
 
-                // Safe because only bytes inside the buffers are accessed and the kernel is
-                // expected to handle arbitrary memory for I/O.
-                let ret = unsafe {
-                    pwritev64(
-                        self.as_raw_fd(),
-                        &iovecs[0],
-                        iovecs.len() as c_int,
-                        offset as off64_t,
-                    )
-                };
-                if ret >= 0 {
-                    Ok(ret as usize)
-                } else {
-                    Err(Error::last_os_error())
-                }
+                oslib::writev_at(
+                    self.as_fd(),
+                    iovecs.as_slice(),
+                    offset.try_into().unwrap(),
+                    flags,
+                )
             }
         }
     };
