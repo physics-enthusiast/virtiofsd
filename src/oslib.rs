@@ -6,8 +6,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 
 // A helper function that check the return value of a C function call
 // and wraps it in a `Result` type, returning the `errno` code as `Err`.
-fn check_retval<T: From<i32> + PartialEq>(t: T) -> Result<T> {
-    if t == T::from(-1_i32) {
+fn check_retval<T: From<i8> + PartialEq>(t: T) -> Result<T> {
+    if t == T::from(-1_i8) {
         Err(Error::last_os_error())
     } else {
         Ok(t)
