@@ -1606,7 +1606,7 @@ impl FileSystem for PassthroughFs {
 
             self.drop_security_capability(f.as_raw_fd())?;
 
-            r.read_to(&f, size as usize, offset)
+            r.read_to(&f, size as usize, offset, None)
         }
     }
 

@@ -17,6 +17,7 @@ use vm_memory::{
 };
 
 use crate::file_traits::{FileReadWriteAtVolatile, FileReadWriteVolatile};
+use crate::oslib;
 
 #[derive(Debug)]
 pub enum Error {
@@ -264,9 +265,10 @@ impl<'a> Reader<'a> {
         dst: F,
         count: usize,
         off: u64,
+        flags: Option<oslib::WritevFlags>,
     ) -> io::Result<usize> {
         self.buffer.consume(count, |bufs| {
-            dst.write_vectored_at_volatile(bufs, off, None)
+            dst.write_vectored_at_volatile(bufs, off, flags)
         })
     }
 
