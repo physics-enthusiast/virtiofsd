@@ -886,6 +886,11 @@ impl PassthroughFs {
         kill_priv: bool,
         flags: u32,
     ) -> io::Result<(Option<Handle>, OpenOptions)> {
+        // We need to clean the `O_APPEND` flag in case the file is mem mapped or if the flag
+        // is later modified in the guest using `fcntl(F_SETFL)`. We do a per-write `O_APPEND`
+        // check setting `RWF_APPEND` for non-mmapped writes, if necessary.
+        let flags = flags & !(libc::O_APPEND as u32);
+
         let file = RwLock::new({
             let _killpriv_guard = if self.cfg.killpriv_v2 && kill_priv {
                 drop_effective_cap("FSETID")?
@@ -1469,7 +1474,11 @@ impl FileSystem for PassthroughFs {
 
         let parent_file = data.get_file()?;
 
-        let fd = self.do_create(&ctx, &parent_file, name, mode, flags, umask, secctx);
+        // We need to clean the `O_APPEND` flag in case the file is mem mapped or if the flag
+        // is later modified in the guest using `fcntl(F_SETFL)`. We do a per-write `O_APPEND`
+        // check setting `RWF_APPEND` for non-mmapped writes, if necessary.
+        let create_flags = flags & !(libc::O_APPEND as u32);
+        let fd = self.do_create(&ctx, &parent_file, name, mode, create_flags, umask, secctx);
 
         let (entry, handle) = match fd {
             Err(last_error) => {
@@ -1584,9 +1593,9 @@ impl FileSystem for PassthroughFs {
         size: u32,
         offset: u64,
         _lock_owner: Option<u64>,
-        _delayed_write: bool,
+        delayed_write: bool,
         kill_priv: bool,
-        _flags: u32,
+        flags: u32,
     ) -> io::Result<usize> {
         let data = self.find_handle(handle, inode)?;
 
@@ -1606,7 +1615,15 @@ impl FileSystem for PassthroughFs {
 
             self.drop_security_capability(f.as_raw_fd())?;
 
-            r.read_to(&f, size as usize, offset, None)
+            // We don't set the `RWF_APPEND` (i.e., equivalent to `O_APPEND`) flag, if it's a
+            // delayed write (i.e., using writeback mode or a mem mapped file) even if the file
+            // was open in append mode, since the guest kernel sends the correct offset.
+            // For non-delayed writes, we set the append mode, if necessary, to correctly handle
+            // writes on a file shared among VMs. This case can only be handled correctly if the
+            // write on the underlying file is performed in append mode.
+            let is_append = flags & libc::O_APPEND as u32 != 0;
+            let flags = (!delayed_write && is_append).then_some(oslib::WritevFlags::RWF_APPEND);
+            r.read_to(&f, size as usize, offset, flags)
         }
     }
 
