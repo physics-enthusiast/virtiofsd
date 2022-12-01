@@ -169,6 +169,8 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_set_robust_list);
     allow_syscall!(ctx, libc::SYS_setxattr);
     allow_syscall!(ctx, libc::SYS_sigaltstack);
+    #[cfg(target_arch = "s390x")]
+    allow_syscall!(ctx, libc::SYS_sigreturn);
     allow_syscall!(ctx, libc::SYS_statx);
     allow_syscall!(ctx, libc::SYS_symlinkat);
     allow_syscall!(ctx, libc::SYS_syncfs);
