@@ -143,6 +143,7 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     ))]
     allow_syscall!(ctx, libc::SYS_open);
     allow_syscall!(ctx, libc::SYS_openat);
+    allow_syscall!(ctx, libc::SYS_openat2);
     allow_syscall!(ctx, libc::SYS_open_by_handle_at);
     allow_syscall!(ctx, libc::SYS_prctl); // TODO restrict to just PR_SET_NAME?
     allow_syscall!(ctx, libc::SYS_preadv);

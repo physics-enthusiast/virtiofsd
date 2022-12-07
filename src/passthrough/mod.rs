@@ -468,6 +468,9 @@ pub struct PassthroughFs {
     // Whether posix ACLs is enabled.
     posix_acl: AtomicBool,
 
+    // Basic facts about the OS
+    os_facts: oslib::OsFacts,
+
     cfg: Config,
 }
 
@@ -510,6 +513,7 @@ impl PassthroughFs {
             writeback: AtomicBool::new(false),
             announce_submounts: AtomicBool::new(false),
             posix_acl: AtomicBool::new(false),
+            os_facts: oslib::OsFacts::new(),
             cfg,
         };
 
@@ -534,6 +538,22 @@ impl PassthroughFs {
 
     pub fn keep_fds(&self) -> Vec<RawFd> {
         vec![self.proc_self_fd.as_raw_fd()]
+    }
+
+    fn open_relative_to(
+        &self,
+        dir: &impl AsRawFd,
+        pathname: &CStr,
+        flags: i32,
+        mode: Option<u32>,
+    ) -> io::Result<RawFd> {
+        let flags = libc::O_NOFOLLOW | libc::O_CLOEXEC | flags;
+
+        if self.os_facts.has_openat2 {
+            oslib::do_open_relative_to(dir, pathname, flags, mode)
+        } else {
+            oslib::openat(dir, pathname, flags, mode)
+        }
     }
 
     fn find_handle(&self, handle: Handle, inode: Inode) -> io::Result<Arc<HandleData>> {
@@ -743,18 +763,7 @@ impl PassthroughFs {
         let p_file = p.get_file()?;
 
         let path_fd = {
-            // Safe because this doesn't modify any memory and we check the return value.
-            let fd = unsafe {
-                libc::openat(
-                    p_file.as_raw_fd(),
-                    name.as_ptr(),
-                    libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                )
-            };
-            if fd < 0 {
-                return Err(io::Error::last_os_error());
-            }
-
+            let fd = self.open_relative_to(&p_file, name, libc::O_PATH, None)?;
             // Safe because we just opened this fd.
             unsafe { File::from_raw_fd(fd) }
         };
@@ -1057,29 +1066,15 @@ impl PassthroughFs {
                 .load(Ordering::Relaxed)
                 .then(|| oslib::ScopedUmask::new(umask));
 
-            // Safe because this doesn't modify any memory and we check the return value. We don't
-            // really check `flags` because if the kernel can't handle poorly specified flags then we
-            // have much bigger problems.
-            //
             // Add libc:O_EXCL to ensure we're not accidentally opening a file the guest wouldn't
             // be allowed to access otherwise.
-            unsafe {
-                libc::openat(
-                    parent_file.as_raw_fd(),
-                    name.as_ptr(),
-                    flags as i32
-                        | libc::O_CREAT
-                        | libc::O_CLOEXEC
-                        | libc::O_NOFOLLOW
-                        | libc::O_EXCL,
-                    mode,
-                )
-            }
+            self.open_relative_to(
+                parent_file,
+                name,
+                flags as i32 | libc::O_CREAT | libc::O_EXCL,
+                mode.into(),
+            )?
         };
-
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
 
         // Set security context
         if let Some(secctx) = secctx {
@@ -1130,16 +1125,8 @@ impl PassthroughFs {
         // setting xattr as well.
 
         // Open O_PATH fd for dir/symlink/special node just created.
-        let path_fd = unsafe {
-            libc::openat(
-                parent_file.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_PATH | libc::O_NOFOLLOW,
-            )
-        };
-        if path_fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let path_fd = self.open_relative_to(parent_file, name, libc::O_PATH, None)?;
+
         let procname = CString::new(format!("{}", path_fd))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
 
@@ -1217,7 +1204,10 @@ impl FileSystem for PassthroughFs {
 
     fn init(&self, capable: FsOptions) -> io::Result<FsOptions> {
         // We use `O_PATH` because we just want this for traversing the directory tree
-        // and not for actually reading the contents.
+        // and not for actually reading the contents. We don't use `open_relative_to()`
+        // here because we are not opening a guest-provided pathname. Also, `self.cfg.root_dir`
+        // is an absolute pathname, thus not relative to CWD, so we will not be able to open it
+        // if "/" didn't change (e.g., chroot or pivot_root)
         let path_fd = openat(
             &libc::AT_FDCWD,
             self.cfg.root_dir.as_str(),
