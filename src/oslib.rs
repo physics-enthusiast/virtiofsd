@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
+use bitflags::bitflags;
 use std::ffi::{CStr, CString};
 use std::io::{Error, Result};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, BorrowedFd, RawFd};
 
 // A helper function that check the return value of a C function call
 // and wraps it in a `Result` type, returning the `errno` code as `Err`.
-fn check_retval<T: From<i32> + PartialEq>(t: T) -> Result<T> {
-    if t == T::from(-1_i32) {
+fn check_retval<T: From<i8> + PartialEq>(t: T) -> Result<T> {
+    if t == T::from(-1_i8) {
         Err(Error::last_os_error())
     } else {
         Ok(t)
@@ -204,4 +205,117 @@ pub fn do_open_relative_to(
             std::mem::size_of::<libc::open_how>(),
         )
     } as RawFd)
+}
+
+mod writev {
+    /// musl does not provide a wrapper for the `pwritev2(2)` system call,
+    /// we need to call it using `syscall(2)`.
+
+    #[cfg(target_env = "gnu")]
+    pub use libc::pwritev2;
+
+    #[cfg(target_env = "musl")]
+    pub unsafe fn pwritev2(
+        fd: libc::c_int,
+        iov: *const libc::iovec,
+        iovcnt: libc::c_int,
+        offset: libc::off_t,
+        flags: libc::c_int,
+    ) -> libc::ssize_t {
+        // The `pwritev2(2)` syscall expects to receive the 64-bit offset split in
+        // its high and low parts (see `syscall(2)`). On 64-bit architectures we
+        // set `lo_off=offset` and `hi_off=0` (glibc does it), since `hi_off` is cleared,
+        // so we need to make sure of not clear the higher 32 bits of `lo_off`, otherwise
+        // the offset will be 0 on 64-bit architectures.
+        let lo_off = offset as libc::c_long; // warn: do not clear the higher 32 bits
+        let hi_off = (offset as u64).checked_shr(libc::c_long::BITS).unwrap_or(0) as libc::c_long;
+        unsafe {
+            libc::syscall(libc::SYS_pwritev2, fd, iov, iovcnt, lo_off, hi_off, flags)
+                as libc::ssize_t
+        }
+    }
+}
+
+// We cannot use libc::RWF_HIPRI, etc, because these constants are not defined in musl.
+bitflags! {
+    /// A bitwise OR of zero or more flags passed in as a parameter to the
+    /// write vectored function `writev_at()`.
+    pub struct WritevFlags: i32 {
+        /// High priority write. Allows block-based filesystems to use polling of the device, which
+        /// provides lower latency, but may use additional resources. (Currently, this feature is
+        /// usable only on a file descriptor opened using the O_DIRECT flag.)
+        const RWF_HIPRI = 0x00000001;
+
+        /// Provide a per-write equivalent of the O_DSYNC open(2) flag. Its effect applies
+        /// only to the data range written by the system call.
+        const RWF_DSYNC = 0x00000002;
+
+        /// Provide a per-write equivalent of the O_SYNC open(2) flag. Its effect applies only
+        /// to the data range written by the system call.
+        const RWF_SYNC = 0x00000004;
+
+        /// Provide a per-write equivalent of the O_APPEND open(2) flag. Its effect applies only
+        /// to the data range written by the system call. The offset argument does not affect the
+        /// write operation; the data is always appended to the end of the file.
+        /// However, if the offset argument is -1, the current file offset is updated.
+        const RWF_APPEND = 0x00000010;
+    }
+}
+
+#[cfg(target_env = "gnu")]
+mod writev_test {
+    // Lets make sure (at compile time) that the WritevFlags don't go out of sync with the libc
+    const _: () = assert!(
+        super::WritevFlags::RWF_HIPRI.bits() == libc::RWF_HIPRI,
+        "invalid RWF_HIPRI value"
+    );
+    const _: () = assert!(
+        super::WritevFlags::RWF_DSYNC.bits() == libc::RWF_DSYNC,
+        "invalid RWF_DSYNC value"
+    );
+    const _: () = assert!(
+        super::WritevFlags::RWF_SYNC.bits() == libc::RWF_SYNC,
+        "invalid RWF_SYNC value"
+    );
+    const _: () = assert!(
+        super::WritevFlags::RWF_APPEND.bits() == libc::RWF_APPEND,
+        "invalid RWF_APPEND value"
+    );
+}
+
+/// Safe wrapper for `pwritev2(2)`
+///
+/// This system call is similar `pwritev(2)`, but add a new argument,
+/// flags, which modifies the behavior on a per-call basis.
+/// Unlike `pwritev(2)`, if the offset argument is -1, then the current file offset
+/// is used and updated.
+///
+/// # Errors
+///
+/// Will return `Err(errno)` if `pwritev2(2)` fails, see `pwritev2(2)` for details.
+///
+/// # Safety
+///
+/// The caller must ensure that each iovec element is valid (i.e., it has a valid `iov_base`
+/// pointer and `iov_len`).
+pub fn writev_at(
+    fd: BorrowedFd,
+    iovecs: &[libc::iovec],
+    offset: i64,
+    flags: Option<WritevFlags>,
+) -> Result<usize> {
+    let flags = flags.unwrap_or(WritevFlags::empty());
+    // SAFETY: `fd` is a valid filed descriptor, `iov` is a valid pointer
+    // to the iovec slice `ìovecs` of `iovcnt` elements. However, the caller
+    // must ensure that each iovec element has a valid `iov_base` pointer and `iov_len`.
+    let bytes_written = check_retval(unsafe {
+        writev::pwritev2(
+            fd.as_raw_fd(),
+            iovecs.as_ptr(),
+            iovecs.len() as libc::c_int,
+            offset,
+            flags.bits(),
+        )
+    })?;
+    Ok(bytes_written as usize)
 }

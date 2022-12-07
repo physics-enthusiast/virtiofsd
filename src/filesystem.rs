@@ -8,7 +8,7 @@ use std::fs::File;
 use std::time::Duration;
 use std::{io, mem};
 
-use crate::fuse;
+use crate::{fuse, oslib};
 
 use super::fs_cache_req_handler::FsCacheReqHandler;
 pub use fuse::{FsOptions, OpenOptions, RemovemappingOne, SetattrValid, SetxattrFlags, ROOT_ID};
@@ -125,7 +125,13 @@ pub trait ZeroCopyReader {
     /// If any error is returned then the implementation must guarantee that no bytes were copied
     /// from `self`. If the underlying write to `f` returns `0` then the implementation must return
     /// an error of the kind `io::ErrorKind::WriteZero`.
-    fn read_to(&mut self, f: &File, count: usize, off: u64) -> io::Result<usize>;
+    fn read_to(
+        &mut self,
+        f: &File,
+        count: usize,
+        off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<usize>;
 
     /// Copies exactly `count` bytes of data from `self` into `f` at offset `off`. `off + count`
     /// must be less than `u64::MAX`.
@@ -134,7 +140,13 @@ pub trait ZeroCopyReader {
     ///
     /// If an error is returned then the number of bytes copied from `self` is unspecified but it
     /// will never be more than `count`.
-    fn read_exact_to(&mut self, f: &mut File, mut count: usize, mut off: u64) -> io::Result<()> {
+    fn read_exact_to(
+        &mut self,
+        f: &mut File,
+        mut count: usize,
+        mut off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<()> {
         let c = count
             .try_into()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
@@ -146,7 +158,7 @@ pub trait ZeroCopyReader {
         }
 
         while count > 0 {
-            match self.read_to(f, count, off) {
+            match self.read_to(f, count, off, flags) {
                 Ok(0) => {
                     return Err(io::Error::new(
                         io::ErrorKind::WriteZero,
@@ -171,10 +183,15 @@ pub trait ZeroCopyReader {
     /// # Errors
     ///
     /// If an error is returned then the number of bytes copied from `self` is unspecified.
-    fn copy_to_end(&mut self, f: &mut File, mut off: u64) -> io::Result<usize> {
+    fn copy_to_end(
+        &mut self,
+        f: &mut File,
+        mut off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<usize> {
         let mut out = 0;
         loop {
-            match self.read_to(f, usize::MAX, off) {
+            match self.read_to(f, usize::MAX, off, flags) {
                 Ok(0) => return Ok(out),
                 Ok(n) => {
                     off = off.saturating_add(n as u64);
@@ -188,14 +205,31 @@ pub trait ZeroCopyReader {
 }
 
 impl<'a, R: ZeroCopyReader> ZeroCopyReader for &'a mut R {
-    fn read_to(&mut self, f: &File, count: usize, off: u64) -> io::Result<usize> {
-        (**self).read_to(f, count, off)
+    fn read_to(
+        &mut self,
+        f: &File,
+        count: usize,
+        off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<usize> {
+        (**self).read_to(f, count, off, flags)
     }
-    fn read_exact_to(&mut self, f: &mut File, count: usize, off: u64) -> io::Result<()> {
-        (**self).read_exact_to(f, count, off)
+    fn read_exact_to(
+        &mut self,
+        f: &mut File,
+        count: usize,
+        off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<()> {
+        (**self).read_exact_to(f, count, off, flags)
     }
-    fn copy_to_end(&mut self, f: &mut File, off: u64) -> io::Result<usize> {
-        (**self).copy_to_end(f, off)
+    fn copy_to_end(
+        &mut self,
+        f: &mut File,
+        off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<usize> {
+        (**self).copy_to_end(f, off, flags)
     }
 }
 

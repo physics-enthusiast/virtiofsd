@@ -10,7 +10,7 @@ use crate::filesystem::{
 };
 use crate::fuse::*;
 use crate::passthrough::util::einval;
-use crate::{Error, Result};
+use crate::{oslib, Error, Result};
 use std::convert::{TryFrom, TryInto};
 use std::ffi::{CStr, CString};
 use std::fs::File;
@@ -30,8 +30,14 @@ const PARENT_DIR_CSTR: &[u8] = b"..";
 struct ZcReader<'a>(Reader<'a>);
 
 impl<'a> ZeroCopyReader for ZcReader<'a> {
-    fn read_to(&mut self, f: &File, count: usize, off: u64) -> io::Result<usize> {
-        self.0.read_to_at(f, count, off)
+    fn read_to(
+        &mut self,
+        f: &File,
+        count: usize,
+        off: u64,
+        flags: Option<oslib::WritevFlags>,
+    ) -> io::Result<usize> {
+        self.0.read_to_at(f, count, off, flags)
     }
 }
 
