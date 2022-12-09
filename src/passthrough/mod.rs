@@ -902,7 +902,7 @@ impl PassthroughFs {
 
         if flags & (libc::O_TRUNC as u32) != 0 {
             let file = file.read().expect("poisoned lock");
-            self.drop_security_capability(file.as_raw_fd())?;
+            self.clear_file_capabilities(file.as_raw_fd())?;
         }
 
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
@@ -1031,7 +1031,7 @@ impl PassthroughFs {
         filtered
     }
 
-    fn drop_security_capability(&self, fd: libc::c_int) -> io::Result<()> {
+    fn clear_file_capabilities(&self, fd: libc::c_int) -> io::Result<()> {
         match self.cfg.xattr_security_capability.as_ref() {
             // Unmapped, let the kernel take care of this.
             None => Ok(()),
@@ -1613,7 +1613,7 @@ impl FileSystem for PassthroughFs {
                 None
             };
 
-            self.drop_security_capability(f.as_raw_fd())?;
+            self.clear_file_capabilities(f.as_raw_fd())?;
 
             // We don't set the `RWF_APPEND` (i.e., equivalent to `O_APPEND`) flag, if it's a
             // delayed write (i.e., using writeback mode or a mem mapped file) even if the file
@@ -1706,7 +1706,7 @@ impl FileSystem for PassthroughFs {
                 u32::MAX
             };
 
-            self.drop_security_capability(inode_file.as_raw_fd())?;
+            self.clear_file_capabilities(inode_file.as_raw_fd())?;
 
             // Safe because this is a constant value and a valid C string.
             let empty = unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) };
@@ -1745,7 +1745,7 @@ impl FileSystem for PassthroughFs {
 
             // Safe because this doesn't modify any memory and we check the return value.
             let res = self
-                .drop_security_capability(fd)
+                .clear_file_capabilities(fd)
                 .map(|_| unsafe { libc::ftruncate(fd, attr.st_size) })?;
             if res < 0 {
                 return Err(io::Error::last_os_error());
@@ -2182,7 +2182,7 @@ impl FileSystem for PassthroughFs {
             // need to get a new fd.
             let file = self.open_inode(inode, libc::O_RDONLY | libc::O_NONBLOCK)?;
 
-            self.drop_security_capability(file.as_raw_fd())?;
+            self.clear_file_capabilities(file.as_raw_fd())?;
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe {
@@ -2197,7 +2197,7 @@ impl FileSystem for PassthroughFs {
         } else {
             let file = data.get_file()?;
 
-            self.drop_security_capability(file.as_raw_fd())?;
+            self.clear_file_capabilities(file.as_raw_fd())?;
 
             let procname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
