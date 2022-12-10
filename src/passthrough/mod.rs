@@ -902,7 +902,7 @@ impl PassthroughFs {
 
         if flags & (libc::O_TRUNC as u32) != 0 {
             let file = file.read().expect("poisoned lock");
-            self.clear_file_capabilities(file.as_raw_fd())?;
+            self.clear_file_capabilities(file.as_raw_fd(), false)?;
         }
 
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
@@ -1031,7 +1031,14 @@ impl PassthroughFs {
         filtered
     }
 
-    fn clear_file_capabilities(&self, fd: libc::c_int) -> io::Result<()> {
+    /// Clears file capabilities
+    ///
+    /// * `fd` - A file descriptor
+    /// * `o_path` - Must be `true` if the file referred to by `fd` was opened with the `O_PATH` flag
+    ///
+    /// If it is not clear whether `fd` was opened with `O_PATH` it is safe to set `o_path`
+    /// to `true`.
+    fn clear_file_capabilities(&self, fd: RawFd, o_path: bool) -> io::Result<()> {
         match self.cfg.xattr_security_capability.as_ref() {
             // Unmapped, let the kernel take care of this.
             None => Ok(()),
@@ -1039,7 +1046,18 @@ impl PassthroughFs {
             // would; which is to drop the "security.capability" xattr
             // on write
             Some(xattrname) => {
-                let res = unsafe { libc::fremovexattr(fd, xattrname.as_ptr()) };
+                let res = if o_path {
+                    let proc_file_name = CString::new(format!("{}", fd))
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                    let _working_dir_guard = set_working_directory(
+                        self.proc_self_fd.as_raw_fd(),
+                        self.root_fd.as_raw_fd(),
+                    );
+                    unsafe { libc::removexattr(proc_file_name.as_ptr(), xattrname.as_ptr()) }
+                } else {
+                    unsafe { libc::fremovexattr(fd, xattrname.as_ptr()) }
+                };
+
                 if res == 0 {
                     Ok(())
                 } else {
@@ -1613,7 +1631,7 @@ impl FileSystem for PassthroughFs {
                 None
             };
 
-            self.clear_file_capabilities(f.as_raw_fd())?;
+            self.clear_file_capabilities(f.as_raw_fd(), false)?;
 
             // We don't set the `RWF_APPEND` (i.e., equivalent to `O_APPEND`) flag, if it's a
             // delayed write (i.e., using writeback mode or a mem mapped file) even if the file
@@ -1706,7 +1724,7 @@ impl FileSystem for PassthroughFs {
                 u32::MAX
             };
 
-            self.clear_file_capabilities(inode_file.as_raw_fd())?;
+            self.clear_file_capabilities(inode_file.as_raw_fd(), true)?;
 
             // Safe because this is a constant value and a valid C string.
             let empty = unsafe { CStr::from_bytes_with_nul_unchecked(EMPTY_CSTR) };
@@ -1745,7 +1763,7 @@ impl FileSystem for PassthroughFs {
 
             // Safe because this doesn't modify any memory and we check the return value.
             let res = self
-                .clear_file_capabilities(fd)
+                .clear_file_capabilities(fd, false)
                 .map(|_| unsafe { libc::ftruncate(fd, attr.st_size) })?;
             if res < 0 {
                 return Err(io::Error::last_os_error());
@@ -2182,7 +2200,7 @@ impl FileSystem for PassthroughFs {
             // need to get a new fd.
             let file = self.open_inode(inode, libc::O_RDONLY | libc::O_NONBLOCK)?;
 
-            self.clear_file_capabilities(file.as_raw_fd())?;
+            self.clear_file_capabilities(file.as_raw_fd(), false)?;
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe {
@@ -2197,7 +2215,7 @@ impl FileSystem for PassthroughFs {
         } else {
             let file = data.get_file()?;
 
-            self.clear_file_capabilities(file.as_raw_fd())?;
+            self.clear_file_capabilities(file.as_raw_fd(), true)?;
 
             let procname = CString::new(format!("{}", file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
