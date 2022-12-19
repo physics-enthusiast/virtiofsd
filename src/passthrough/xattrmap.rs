@@ -294,7 +294,7 @@ impl Rule {
             Ok(bytes)
         };
 
-        let type_ = Type::from_bytes(&next_token()?)?;
+        let type_ = Type::from_bytes(next_token()?)?;
 
         Ok(match type_ {
             Type::Map => Rule {
