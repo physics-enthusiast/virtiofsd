@@ -1552,7 +1552,7 @@ impl FileSystem for PassthroughFs {
             libc::O_RDONLY
         };
 
-        let file = self.open_inode(inode, open_flags as i32)?;
+        let file = self.open_inode(inode, open_flags)?;
         (*vu_req).map(foffset, moffset, len, flags, file.as_raw_fd())
     }
 
