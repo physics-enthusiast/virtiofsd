@@ -36,8 +36,7 @@ trait SafeStatXAccess {
 impl SafeStatXAccess for statx_st {
     fn stat64(&self) -> Option<libc::stat64> {
         fn makedev(maj: libc::c_uint, min: libc::c_uint) -> libc::dev_t {
-            // Safe because there are no side effects
-            unsafe { libc::makedev(maj, min) }
+            libc::makedev(maj, min)
         }
 
         if self.stx_mask & STATX_BASIC_STATS != 0 {
