@@ -1047,7 +1047,7 @@ impl PassthroughFs {
             // on write
             Some(xattrname) => {
                 let res = if o_path {
-                    let proc_file_name = CString::new(format!("{}", fd))
+                    let proc_file_name = CString::new(format!("{fd}"))
                         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                     let _working_dir_guard = set_working_directory(
                         self.proc_self_fd.as_raw_fd(),
@@ -1150,7 +1150,7 @@ impl PassthroughFs {
         // Open O_PATH fd for dir/symlink/special node just created.
         let path_fd = self.open_relative_to(parent_file, name, libc::O_PATH, None)?;
 
-        let procname = CString::new(format!("{}", path_fd))
+        let procname = CString::new(format!("{path_fd}"))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
 
         let procname = match procname {

@@ -11,13 +11,12 @@ const DEFAULT_NOFILE: rlim_t = 1_000_000;
 /// Gets the maximum number of open files.
 fn get_max_nofile() -> Result<rlim_t, String> {
     let path = "/proc/sys/fs/nr_open";
-    let max_str =
-        fs::read_to_string(path).map_err(|error| format!("Reading {}: {:?}", path, error))?;
+    let max_str = fs::read_to_string(path).map_err(|error| format!("Reading {path}: {error:?}"))?;
 
     max_str
         .trim()
         .parse()
-        .map_err(|error| format!("Parsing {}: {:?}", path, error))
+        .map_err(|error| format!("Parsing {path}: {error:?}"))
 }
 
 /// Gets the hard limit of open files.
@@ -65,7 +64,7 @@ pub fn setup_rlimit_nofile(nofile: Option<u64>) -> Result<(), String> {
     };
 
     if target_limit > max_nofile {
-        return Err(format!("It cannot be increased above {}", max_nofile));
+        return Err(format!("It cannot be increased above {max_nofile}"));
     }
 
     if let Err(error) = setup_rlimit_nofile_to(target_limit) {
@@ -79,10 +78,7 @@ pub fn setup_rlimit_nofile(nofile: Option<u64>) -> Result<(), String> {
                 target_limit, rlim_max
             );
             setup_rlimit_nofile_to(rlim_max).map_err(|error| {
-                format!(
-                    "Cannot increase the soft limit to the hard limit: {}",
-                    error
-                )
+                format!("Cannot increase the soft limit to the hard limit: {error}")
             })?
         }
     }

@@ -5,7 +5,7 @@ use crate::passthrough::stat::{statx, MountId};
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
@@ -239,17 +239,15 @@ impl MountFds {
 
             // Clone `mount_point` so we can still use it in error messages
             let c_mount_point = CString::new(mount_point.clone()).map_err(|e| {
-                self.error_for(mount_id, e).prefix(format!(
-                    "Failed to convert \"{}\" to a CString",
-                    mount_point
-                ))
+                self.error_for(mount_id, e)
+                    .prefix(format!("Failed to convert \"{mount_point}\" to a CString"))
             })?;
 
             let mount_point_fd = unsafe { libc::open(c_mount_point.as_ptr(), libc::O_PATH) };
             if mount_point_fd < 0 {
                 return Err(self
                     .error_for(mount_id, io::Error::last_os_error())
-                    .prefix(format!("Failed to open mount point \"{}\"", mount_point)));
+                    .prefix(format!("Failed to open mount point \"{mount_point}\"")));
             }
 
             // Safe because we have just opened this FD
@@ -258,7 +256,7 @@ impl MountFds {
             // Ensure that `mount_point_path` refers to an inode with the mount ID we need
             let stx = statx(&mount_point_path, None).map_err(|e| {
                 self.error_for(mount_id, e)
-                    .prefix(format!("Failed to stat mount point \"{}\"", mount_point))
+                    .prefix(format!("Failed to stat mount point \"{mount_point}\""))
             })?;
 
             if stx.mnt_id != mount_id {
@@ -276,8 +274,7 @@ impl MountFds {
                 return Err(self
                     .error_for(mount_id, io::Error::from_raw_os_error(libc::EIO))
                     .set_desc(format!(
-                        "Mount point \"{}\" is not a regular file or directory",
-                        mount_point
+                        "Mount point \"{mount_point}\" is not a regular file or directory"
                     )));
             }
 
@@ -288,8 +285,7 @@ impl MountFds {
             )
             .map_err(|e| {
                 self.error_for(mount_id, e).prefix(format!(
-                    "Failed to reopen mount point \"{}\" for reading",
-                    mount_point
+                    "Failed to reopen mount point \"{mount_point}\" for reading"
                 ))
             })?;
 
@@ -327,7 +323,7 @@ impl MountFds {
         let mountinfo = {
             let mountinfo_file = &mut *self.mountinfo.lock().unwrap();
 
-            mountinfo_file.seek(SeekFrom::Start(0)).map_err(|e| {
+            mountinfo_file.rewind().map_err(|e| {
                 self.error_for_nolookup(mount_id, e)
                     .prefix("Failed to access /proc/self/mountinfo".into())
             })?;
@@ -372,10 +368,7 @@ impl MountFds {
 
             None => Err(self
                 .error_for_nolookup(mount_id, io::Error::from_raw_os_error(libc::EINVAL))
-                .set_desc(format!(
-                    "Failed to find mount root for mount ID {}",
-                    mount_id
-                ))),
+                .set_desc(format!("Failed to find mount root for mount ID {mount_id}"))),
         }
     }
 

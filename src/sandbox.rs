@@ -86,7 +86,7 @@ impl fmt::Display for Error {
                     root (Use '--sandbox namespace' instead)"
                 )
             }
-            _ => write!(f, "{:?}", self),
+            _ => write!(f, "{self:?}"),
         }
     }
 }
@@ -276,10 +276,10 @@ impl Sandbox {
         fs::write("/proc/self/setgroups", "deny\n").map_err(Error::WriteSetGroups)?;
 
         // Set up 1-to-1 mappings for our uid and gid.
-        let uid_mapping = format!("{} {} 1\n", uid, uid);
+        let uid_mapping = format!("{uid} {uid} 1\n");
         fs::write("/proc/self/uid_map", uid_mapping).map_err(Error::WriteUidMap)?;
 
-        let gid_mapping = format!("{} {} 1\n", gid, gid);
+        let gid_mapping = format!("{gid} {gid} 1\n");
         fs::write("/proc/self/gid_map", gid_mapping).map_err(Error::WriteGidMap)?;
         Ok(())
     }
