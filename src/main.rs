@@ -81,13 +81,12 @@ impl fmt::Display for Error {
             UnshareCloneFs(error) => {
                 write!(
                     f,
-                    "The unshare(CLONE_FS) syscall failed with '{}'. \
+                    "The unshare(CLONE_FS) syscall failed with '{error}'. \
                     If running in a container please check that the container \
-                    runtime seccomp policy allows unshare.",
-                    error
+                    runtime seccomp policy allows unshare."
                 )
             }
-            _ => write!(f, "{:?}", self),
+            _ => write!(f, "{self:?}"),
         }
     }
 }
@@ -616,14 +615,14 @@ fn parse_compat(opt: Opt) -> Opt {
     use structopt::clap::{Error, ErrorKind};
     fn value_error(arg: &str, value: &str) -> ! {
         Error::with_description(
-            format!("Invalid compat value '{}' for '-o {}'", value, arg).as_str(),
+            format!("Invalid compat value '{value}' for '-o {arg}'").as_str(),
             ErrorKind::InvalidValue,
         )
         .exit()
     }
     fn argument_error(arg: &str) -> ! {
         Error::with_description(
-            format!("Invalid compat argument '-o {}'", arg).as_str(),
+            format!("Invalid compat argument '-o {arg}'").as_str(),
             ErrorKind::UnknownArgument,
         )
         .exit()
