@@ -128,6 +128,7 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_listxattr);
     allow_syscall!(ctx, libc::SYS_lseek);
     allow_syscall!(ctx, libc::SYS_madvise);
+    allow_syscall!(ctx, libc::SYS_membarrier);
     allow_syscall!(ctx, libc::SYS_mkdirat);
     allow_syscall!(ctx, libc::SYS_mknodat);
     allow_syscall!(ctx, libc::SYS_mmap);
