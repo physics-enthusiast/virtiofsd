@@ -10,6 +10,7 @@ pub mod file_traits;
 pub mod filesystem;
 pub mod fs_cache_req_handler;
 pub mod fuse;
+pub mod idmap;
 pub mod limits;
 pub mod macros;
 pub mod oslib;

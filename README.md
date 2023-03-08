@@ -263,6 +263,42 @@ Default: never.
 Add custom rules for translating extended attributes between host and guest (e.g., `:map::user.virtiofs.:`).
 For additional details please see [Extended attribute mapping](doc/xattr-mapping.md).
 
+```shell
+--uid-map=:namespace_uid:host_uid:count:
+```
+When running virtiofsd as non-root, map a range of UIDs from host to namespace.
+In order to use this option, the range of subordinate user IDs must have been set up via
+`subuid(5)`. virtiofsd uses `newuidmap(1)`, that requires a valid subuid, to do the mapping.
+If this option is not provided, virtiofsd will set up a 1-to-1 mapping for current uid.
+
+namespace_uid: Beginning of the range of UIDs inside the user namespace.
+host_uid: Beginning of the range of UIDs outside the user namespace.
+count: Length of the ranges (both inside and outside the user namespace).
+
+For instance, let's assume the invoking UID is 1000 and the content of /etc/subuid is: 1000:100000:65536,
+which creates 65536 subuids starting at 100000, i.e. the (inclusive) range [100000, 165535], belonging to the actual UID 1000.
+This range can be mapped to the UIDs [0, 65535] in virtiofsd’s user namespace (i.e. as seen in the guest) via --uid-map=:0:100000:65536:.
+Alternatively, you can simply map your own UID to a single UID in the namespace:
+For example, --uid-map=:0:1000:1: would map UID 1000 to root’s UID in the namespace (and thus the guest).
+
+```shell
+--gid-map=:namespace_gid:host_gid:count:
+```
+When running virtiofsd as non-root, map a range of GIDs from host to namespace.
+In order to use this option, the range of subordinate group IDs must have been set up via
+`subgid(5)`. virtiofsd uses `newgidmap(1)`, that requires a valid subgid, to do the mapping.
+If this option is not provided, virtiofsd will set up a 1-to-1 mapping for current gid.
+
+namespace_gid: Beginning of the range of GIDs inside the user namespace.
+host_gid: Beginning of the range of GIDs outside the user namespace.
+count: Length of the ranges (both inside and outside the user namespace).
+
+For instance, let's assume the invoking GID is 1000 and the content of /etc/subgid is: 1000:100000:65536,
+which creates 65536 subgids starting at 100000, i.e. the (inclusive) range [100000, 165535], belonging to the actual GID 1000.
+This range can be mapped to the GIDs [0, 65535] in virtiofsd’s user namespace (i.e. as seen in the guest) via --gid-map=:0:100000:65536:.
+Alternatively, you can simply map your own GID to a single GID in the namespace:
+For example, --gid-map=:0:1000:1: would map GID 1000 to root’s GID in the namespace (and thus the guest).
+
 ### Examples
 Export `/mnt` on vhost-user UNIX domain socket `/tmp/vfsd.sock`:
 

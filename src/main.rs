@@ -14,6 +14,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::{env, error, fmt, io, process};
+use virtiofsd::idmap::{GidMap, UidMap};
 
 use structopt::StructOpt;
 
@@ -609,6 +610,22 @@ struct Opt {
     /// from client and stores it in the newly created file.
     #[structopt(long = "security-label")]
     security_label: bool,
+
+    /// Map a range of UIDs from the host into the namespace, given as
+    /// :namespace_uid:host_uid:count:
+    ///
+    /// For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535]
+    /// into the namespace as [0, 65535].
+    #[structopt(long)]
+    uid_map: Option<UidMap>,
+
+    /// Map a range of GIDs from the host into the namespace, given as
+    /// :namespace_gid:host_gid:count:
+    ///
+    /// For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535]
+    /// into the namespace as [0, 65535].
+    #[structopt(long)]
+    gid_map: Option<GidMap>,
 }
 
 fn parse_compat(opt: Opt) -> Opt {
@@ -937,7 +954,13 @@ fn main() {
         process::exit(1)
     });
 
-    let mut sandbox = Sandbox::new(shared_dir.to_string(), sandbox_mode).unwrap_or_else(|error| {
+    let mut sandbox = Sandbox::new(
+        shared_dir.to_string(),
+        sandbox_mode,
+        opt.uid_map,
+        opt.gid_map,
+    )
+    .unwrap_or_else(|error| {
         error!("Error creating sandbox: {}", error);
         process::exit(1)
     });
