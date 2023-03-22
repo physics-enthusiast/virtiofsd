@@ -526,9 +526,13 @@ struct Opt {
     #[structopt(long, parse(try_from_str = parse_seccomp), default_value = "kill")]
     seccomp: SeccompAction,
 
-    /// Tell the guest which directories are mount points
+    /// Tell the guest which directories are mount points [default]
     #[structopt(long)]
     announce_submounts: bool,
+
+    /// Do not tell the guest which directories are mount points
+    #[structopt(long, overrides_with("announce-submounts"))]
+    no_announce_submounts: bool,
 
     /// When to use file handles to reference inodes instead of O_PATH file descriptors (never,
     /// prefer, mandatory)
@@ -852,6 +856,9 @@ fn main() {
     // --killpriv-v2 or -o killpriv_v2. Otherwise disable it by default.
     let killpriv_v2 = opt.killpriv_v2;
 
+    // Disable announce submounts if the user asked for it
+    let announce_submounts = !opt.no_announce_submounts;
+
     if opt.print_capabilities {
         print_capabilities();
         return;
@@ -980,7 +987,7 @@ fn main() {
         xattrmap,
         proc_sfd_rawfd: sandbox.get_proc_self_fd(),
         proc_mountinfo_rawfd: sandbox.get_mountinfo_fd(),
-        announce_submounts: opt.announce_submounts,
+        announce_submounts,
         inode_file_handles: opt.inode_file_handles.into(),
         readdirplus,
         writeback: opt.writeback,
