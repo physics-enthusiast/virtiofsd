@@ -154,6 +154,7 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_read);
     allow_syscall!(ctx, libc::SYS_readlinkat);
     allow_syscall!(ctx, libc::SYS_recvmsg);
+    #[cfg(not(target_arch = "riscv64"))]
     allow_syscall!(ctx, libc::SYS_renameat);
     allow_syscall!(ctx, libc::SYS_renameat2);
     allow_syscall!(ctx, libc::SYS_removexattr);
