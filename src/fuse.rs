@@ -12,7 +12,7 @@ use vm_memory::ByteValued;
 pub const KERNEL_VERSION: u32 = 7;
 
 /// Minor version number of this interface.
-pub const KERNEL_MINOR_VERSION: u32 = 36;
+pub const KERNEL_MINOR_VERSION: u32 = 37;
 
 /// Minimum Minor version number supported. If client sends a minor
 /// number lesser than this, we don't support it.
@@ -699,6 +699,7 @@ enum_value! {
         SetupMapping = 48,
         RemoveMapping = 49,
         Syncfs = 50,
+        TmpFile = 51,
     }
 }
 

@@ -1177,4 +1177,9 @@ pub trait FileSystem {
     fn notify_reply(&self) -> io::Result<()> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
+
+    /// TODO: support this
+    fn tmpfile(&self) -> io::Result<(Entry, Option<Self::Handle>, OpenOptions)> {
+        Err(io::Error::from_raw_os_error(libc::ENOSYS))
+    }
 }

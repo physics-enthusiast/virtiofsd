@@ -149,6 +149,7 @@ impl<F: FileSystem + Sync> Server<F> {
                 Opcode::SetupMapping => self.setupmapping(in_header, r, w, vu_req),
                 Opcode::RemoveMapping => self.removemapping(in_header, r, w, vu_req),
                 Opcode::Syncfs => self.syncfs(in_header, w),
+                Opcode::TmpFile => self.tmpfile(in_header, r, w),
             }
         } else {
             debug!(
@@ -1543,6 +1544,15 @@ impl<F: FileSystem + Sync> Server<F> {
             Ok(()) => reply_ok(None::<u8>, None, in_header.unique, w),
             Err(e) => reply_error(e, in_header.unique, w),
         }
+    }
+
+    fn tmpfile(&self, in_header: InHeader, _r: Reader, w: Writer) -> Result<usize> {
+        let e = self
+            .fs
+            .tmpfile()
+            .err()
+            .unwrap_or_else(|| panic!("unsupported operation"));
+        reply_error(e, in_header.unique, w)
     }
 }
 
