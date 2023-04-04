@@ -11,8 +11,8 @@ pub mod xattrmap;
 
 use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::filesystem::{
-    Context, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions, SecContext,
-    SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
+    Context, Entry, Extensions, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions,
+    SecContext, SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
 };
 use crate::passthrough::inode_store::{Inode, InodeData, InodeFile, InodeIds, InodeStore};
 use crate::passthrough::util::{ebadf, einval, is_safe_inode, openat, reopen_fd_through_proc};
@@ -1070,7 +1070,7 @@ impl PassthroughFs {
         mode: u32,
         flags: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<RawFd> {
         let fd = {
             let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
@@ -1090,7 +1090,7 @@ impl PassthroughFs {
         };
 
         // Set security context
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             // Remap security xattr name.
             let xattr_name = match self.map_client_xattrname(&secctx.name) {
                 Ok(xattr_name) => xattr_name,
@@ -1372,7 +1372,7 @@ impl FileSystem for PassthroughFs {
         name: &CStr,
         mode: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1399,7 +1399,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Set security context on dir.
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
                 unsafe {
                     libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR);
@@ -1470,7 +1470,7 @@ impl FileSystem for PassthroughFs {
         kill_priv: bool,
         flags: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<(Entry, Option<Handle>, OpenOptions)> {
         let data = self
             .inodes
@@ -1486,7 +1486,15 @@ impl FileSystem for PassthroughFs {
         // is later modified in the guest using `fcntl(F_SETFL)`. We do a per-write `O_APPEND`
         // check setting `RWF_APPEND` for non-mmapped writes, if necessary.
         let create_flags = flags & !(libc::O_APPEND as u32);
-        let fd = self.do_create(&ctx, &parent_file, name, mode, create_flags, umask, secctx);
+        let fd = self.do_create(
+            &ctx,
+            &parent_file,
+            name,
+            mode,
+            create_flags,
+            umask,
+            extensions,
+        );
 
         let (entry, handle) = match fd {
             Err(last_error) => {
@@ -1856,7 +1864,7 @@ impl FileSystem for PassthroughFs {
         mode: u32,
         rdev: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1891,7 +1899,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Set security context on node.
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
                 unsafe {
                     libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
@@ -1953,7 +1961,7 @@ impl FileSystem for PassthroughFs {
         linkname: &CStr,
         parent: Inode,
         name: &CStr,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1977,7 +1985,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Set security context on symlink.
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
                 unsafe {
                     libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);

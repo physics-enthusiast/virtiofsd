@@ -5,8 +5,8 @@
 use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::descriptor_utils::{Reader, Writer};
 use crate::filesystem::{
-    Context, DirEntry, DirectoryIterator, Entry, FileSystem, GetxattrReply, ListxattrReply,
-    SecContext, ZeroCopyReader, ZeroCopyWriter,
+    Context, DirEntry, DirectoryIterator, Entry, Extensions, FileSystem, GetxattrReply,
+    ListxattrReply, SecContext, ZeroCopyReader, ZeroCopyWriter,
 };
 use crate::fuse::*;
 use crate::passthrough::util::einval;
@@ -387,7 +387,7 @@ impl<F: FileSystem + Sync> Server<F> {
             bytes_to_cstr(linkname)?,
             in_header.nodeid.into(),
             bytes_to_cstr(name)?,
-            secctx,
+            Extensions { secctx },
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -429,7 +429,7 @@ impl<F: FileSystem + Sync> Server<F> {
             mode,
             rdev,
             umask,
-            secctx,
+            Extensions { secctx },
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -468,7 +468,7 @@ impl<F: FileSystem + Sync> Server<F> {
             bytes_to_cstr(name)?,
             mode,
             umask,
-            secctx,
+            Extensions { secctx },
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -1349,7 +1349,7 @@ impl<F: FileSystem + Sync> Server<F> {
             kill_priv,
             flags,
             umask,
-            secctx,
+            Extensions { secctx },
         ) {
             Ok((entry, handle, opts)) => {
                 let entry_out = EntryOut {
