@@ -291,9 +291,12 @@ impl<'a, B: BitmapSlice> io::Read for Reader<'a, B> {
             for vs in bufs {
                 let copy_len = cmp::min(rem.len(), vs.len());
 
-                // Safe because we have already verified that `vs` points to valid memory.
+                // SAFETY: Safe because we verify that we do not read outside
+                // of the slice's bound. The slice guard will only get dropped
+                // after the function returns. This will keep the pointer valid
+                // while reads are happening.
                 unsafe {
-                    copy_nonoverlapping(vs.as_ptr() as *const u8, rem.as_mut_ptr(), copy_len);
+                    copy_nonoverlapping(vs.ptr_guard().as_ptr(), rem.as_mut_ptr(), copy_len);
                 }
                 rem = &mut rem[copy_len..];
                 total += copy_len;
@@ -405,9 +408,12 @@ impl<'a, B: BitmapSlice> io::Write for Writer<'a, B> {
             for vs in bufs {
                 let copy_len = cmp::min(rem.len(), vs.len());
 
-                // Safe because we have already verified that `vs` points to valid memory.
+                // SAFETY: Safe because we ensure that we do not write over the
+                // slice's bounds. The slice guard will only get dropped after
+                // the function returns. This will keep the pointer valid while
+                // writes are happening.
                 unsafe {
-                    copy_nonoverlapping(rem.as_ptr(), vs.as_ptr(), copy_len);
+                    copy_nonoverlapping(rem.as_ptr(), vs.ptr_guard_mut().as_ptr(), copy_len);
                 }
                 vs.bitmap().mark_dirty(0, copy_len);
                 rem = &rem[copy_len..];

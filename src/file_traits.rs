@@ -72,7 +72,8 @@ macro_rules! volatile_impl {
                 bufs: &[&VolatileSlice<B>],
                 offset: u64,
             ) -> Result<usize> {
-                let iovecs: Vec<libc::iovec> = bufs
+                let slice_guards: Vec<_> = bufs.iter().map(|s| s.ptr_guard_mut()).collect();
+                let iovecs: Vec<libc::iovec> = slice_guards
                     .iter()
                     .map(|s| libc::iovec {
                         iov_base: s.as_ptr() as *mut c_void,
@@ -84,8 +85,10 @@ macro_rules! volatile_impl {
                     return Ok(0);
                 }
 
-                // Safe because only bytes inside the buffers are accessed and the kernel is
-                // expected to handle arbitrary memory for I/O.
+                // SAFETY: Safe because only bytes inside the buffers are
+                // accessed and the kernel is expected to handle arbitrary
+                // memory for I/O. The pointers into the slice are valid since
+                // the slice_guards are still in scope.
                 let ret = unsafe {
                     preadv64(
                         self.as_raw_fd(),
@@ -119,7 +122,8 @@ macro_rules! volatile_impl {
                 offset: u64,
                 flags: Option<oslib::WritevFlags>,
             ) -> Result<usize> {
-                let iovecs: Vec<libc::iovec> = bufs
+                let slice_guards: Vec<_> = bufs.iter().map(|s| s.ptr_guard()).collect();
+                let iovecs: Vec<libc::iovec> = slice_guards
                     .iter()
                     .map(|s| libc::iovec {
                         iov_base: s.as_ptr() as *mut c_void,
@@ -131,8 +135,10 @@ macro_rules! volatile_impl {
                     return Ok(0);
                 }
 
-                // SAFETY: Each `libc::iovec` element is created from a `VolatileSlice`
-                // of the guest memory.
+                // SAFETY: Each `libc::iovec` element is created from a
+                // `VolatileSlice` of the guest memory. The pointers are valid
+                // because the slice guards are still in scope. We also ensure
+                // that we do not read over the slice bounds.
                 unsafe {
                     oslib::writev_at(
                         self.as_fd(),
