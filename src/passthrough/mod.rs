@@ -931,7 +931,7 @@ impl PassthroughFs {
         extensions: Extensions,
     ) -> io::Result<RawFd> {
         let fd = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1243,7 +1243,7 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1735,7 +1735,7 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1832,7 +1832,7 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::symlinkat(linkname.as_ptr(), parent_file.as_raw_fd(), name.as_ptr()) }
@@ -2032,7 +2032,7 @@ impl FileSystem for PassthroughFs {
             && xattr_name.eq("system.posix_acl_access")
         {
             let cap_guard = drop_effective_cap("FSETID")?;
-            let creds_guard = set_creds(ctx.uid, ctx.gid)?;
+            let credentials_guard = set_creds(ctx.uid, ctx.gid)?;
 
             // If `set_creds()` changes the effective user ID to non-zero, then the effective set is
             // cleared from all capabilities. When switching back to root the permitted set is
@@ -2046,7 +2046,7 @@ impl FileSystem for PassthroughFs {
                 }
             }
 
-            (cap_guard, creds_guard)
+            (cap_guard, credentials_guard)
         } else {
             (None, (None, None))
         };
