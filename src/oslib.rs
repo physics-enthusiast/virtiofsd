@@ -354,3 +354,38 @@ pub fn pipe() -> io::Result<(PipeReader, PipeWriter)> {
         ))
     }
 }
+
+// We want credential changes to be per-thread because otherwise
+// we might interfere with operations being carried out on other
+// threads with different uids/gids. However, posix requires that
+// all threads in a process share the same credentials. To do this
+// libc uses signals to ensure that when one thread changes its
+// credentials the other threads do the same thing.
+//
+// So instead we invoke the syscall directly in order to get around
+// this limitation. Another option is to use the setfsuid and
+// setfsgid systems calls. However since those calls have no way to
+// return an error, it's preferable to do this instead.
+/// Set effective user ID
+pub fn seteffuid(uid: libc::uid_t) -> io::Result<()> {
+    check_retval(unsafe { libc::syscall(libc::SYS_setresuid, -1, uid, -1) })?;
+    Ok(())
+}
+
+/// Set effective group ID
+pub fn seteffgid(gid: libc::gid_t) -> io::Result<()> {
+    check_retval(unsafe { libc::syscall(libc::SYS_setresgid, -1, gid, -1) })?;
+    Ok(())
+}
+
+/// Set supplementary group
+pub fn setsupgroup(gid: libc::gid_t) -> io::Result<()> {
+    check_retval(unsafe { libc::setgroups(1, &gid) })?;
+    Ok(())
+}
+
+/// Drop all supplementary groups
+pub fn dropsupgroups() -> io::Result<()> {
+    check_retval(unsafe { libc::setgroups(0, std::ptr::null()) })?;
+    Ok(())
+}

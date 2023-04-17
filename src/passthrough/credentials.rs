@@ -1,80 +1,107 @@
+use crate::oslib;
 use crate::passthrough::util::einval;
 use std::io;
-macro_rules! scoped_cred {
-    ($name:ident, $ty:ty, $syscall_nr:expr) => {
-        #[derive(Debug)]
-        pub struct $name;
 
-        impl $name {
-            // Changes the effective uid/gid of the current thread to `val`.  Changes
-            // the thread's credentials back to root when the returned struct is dropped.
-            fn new(val: $ty) -> io::Result<Option<$name>> {
-                if val == 0 {
-                    // Nothing to do since we are already uid 0.
-                    return Ok(None);
-                }
-
-                // We want credential changes to be per-thread because otherwise
-                // we might interfere with operations being carried out on other
-                // threads with different uids/gids.  However, posix requires that
-                // all threads in a process share the same credentials.  To do this
-                // libc uses signals to ensure that when one thread changes its
-                // credentials the other threads do the same thing.
-                //
-                // So instead we invoke the syscall directly in order to get around
-                // this limitation.  Another option is to use the setfsuid and
-                // setfsgid systems calls.   However since those calls have no way to
-                // return an error, it's preferable to do this instead.
-
-                // This call is safe because it doesn't modify any memory and we
-                // check the return value.
-                let res = unsafe { libc::syscall($syscall_nr, -1, val, -1) };
-                if res == 0 {
-                    Ok(Some($name))
-                } else {
-                    Err(io::Error::last_os_error())
-                }
-            }
-        }
-
-        impl Drop for $name {
-            fn drop(&mut self) {
-                let res = unsafe { libc::syscall($syscall_nr, -1, 0, -1) };
-                if res < 0 {
-                    error!(
-                        "failed to change credentials back to root: {}",
-                        io::Error::last_os_error(),
-                    );
-                }
-            }
-        }
-    };
-}
-scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid);
-scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid);
-
-pub fn set_creds(
+pub struct UnixCredentials {
     uid: libc::uid_t,
     gid: libc::gid_t,
-) -> io::Result<(Option<ScopedUid>, Option<ScopedGid>)> {
-    // We have to change the gid before we change the uid because if we change the uid first then we
-    // lose the capability to change the gid.  However changing back can happen in any order.
-    let creds_guard = ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)));
+    sup_gid: Option<u32>,
+    keep_capability: bool,
+}
 
-    // We don't have access to process supplementary groups. To work around this
-    // we can set the `DAC_OVERRIDE` in the effective set. We are allowed to set
-    // the capability because `set_creds()` only changes the effective user ID,
-    // so we still have the 'DAC_OVERRIDE' in the permitted set. After switching
-    // back to root the permitted set is copied to the effective set, so no additional
-    // steps are required.
-    if let Err(e) = crate::util::add_cap_to_eff("DAC_OVERRIDE") {
-        warn!(
-            "failed to add 'DAC_OVERRIDE' to the effective set of capabilities: {}",
-            e
-        );
+impl UnixCredentials {
+    pub fn new(uid: libc::uid_t, gid: libc::gid_t) -> Self {
+        UnixCredentials {
+            uid,
+            gid,
+            sup_gid: None,
+            keep_capability: false,
+        }
     }
 
-    creds_guard
+    /// Set a supplementary group. Set `supported_extension` to `false` to signal that a
+    /// supplementary group maybe required, but the guest was not able to tell us which,
+    /// so we have to rely on keeping the DAC_OVERRIDE capability.
+    pub fn supplementary_gid(self, supported_extension: bool, sup_gid: Option<u32>) -> Self {
+        UnixCredentials {
+            uid: self.uid,
+            gid: self.gid,
+            sup_gid,
+            keep_capability: !supported_extension,
+        }
+    }
+
+    /// Changes the effective uid/gid of the current thread to `val`.  Changes
+    /// the thread's credentials back to root when the returned struct is dropped.
+    pub fn set(self) -> io::Result<Option<UnixCredentialsGuard>> {
+        let change_uid = self.uid != 0;
+        let change_gid = self.gid != 0;
+
+        // We have to change the gid before we change the uid because if we
+        // change the uid first then we lose the capability to change the gid.
+        // However changing back can happen in any order.
+        if let Some(sup_gid) = self.sup_gid {
+            oslib::setsupgroup(sup_gid)?;
+        }
+
+        if change_gid {
+            oslib::seteffgid(self.gid)?;
+        }
+
+        if change_uid {
+            oslib::seteffuid(self.uid)?;
+        }
+
+        if change_uid && self.keep_capability {
+            // Before kernel 6.3, we don't have access to process supplementary groups.
+            // To work around this we can set the `DAC_OVERRIDE` in the effective set.
+            // We are allowed to set the capability because we only change the effective
+            // user ID, so we still have the 'DAC_OVERRIDE' in the permitted set.
+            // After switching back to root the permitted set is copied to the effective set,
+            // so no additional steps are required.
+            if let Err(e) = crate::util::add_cap_to_eff("DAC_OVERRIDE") {
+                warn!("failed to add 'DAC_OVERRIDE' to the effective set of capabilities: {e}");
+            }
+        }
+
+        if !change_uid && !change_gid {
+            return Ok(None);
+        }
+
+        Ok(Some(UnixCredentialsGuard {
+            reset_uid: change_uid,
+            reset_gid: change_gid,
+            drop_sup_gid: self.sup_gid.is_some(),
+        }))
+    }
+}
+
+pub struct UnixCredentialsGuard {
+    reset_uid: bool,
+    reset_gid: bool,
+    drop_sup_gid: bool,
+}
+
+impl Drop for UnixCredentialsGuard {
+    fn drop(&mut self) {
+        if self.reset_uid {
+            oslib::seteffuid(0).unwrap_or_else(|e| {
+                error!("failed to change uid back to root: {e}");
+            });
+        }
+
+        if self.reset_gid {
+            oslib::seteffgid(0).unwrap_or_else(|e| {
+                error!("failed to change gid back to root: {e}");
+            });
+        }
+
+        if self.drop_sup_gid {
+            oslib::dropsupgroups().unwrap_or_else(|e| {
+                error!("failed to drop supplementary groups: {e}");
+            });
+        }
+    }
 }
 
 pub struct ScopedCaps {

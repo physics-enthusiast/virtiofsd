@@ -15,7 +15,7 @@ use crate::filesystem::{
     Context, Entry, Extensions, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions,
     SecContext, SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
 };
-use crate::passthrough::credentials::{drop_effective_cap, set_creds};
+use crate::passthrough::credentials::{drop_effective_cap, UnixCredentials};
 use crate::passthrough::inode_store::{Inode, InodeData, InodeFile, InodeIds, InodeStore};
 use crate::passthrough::util::{ebadf, is_safe_inode, openat, reopen_fd_through_proc};
 use crate::read_dir::ReadDir;
@@ -931,7 +931,9 @@ impl PassthroughFs {
         extensions: Extensions,
     ) -> io::Result<RawFd> {
         let fd = {
-            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(false, None)
+                .set()?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1243,7 +1245,9 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(false, None)
+                .set()?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1735,7 +1739,9 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(false, None)
+                .set()?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1832,7 +1838,9 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let _credentials_guard = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(false, None)
+                .set()?;
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::symlinkat(linkname.as_ptr(), parent_file.as_raw_fd(), name.as_ptr()) }
@@ -2032,11 +2040,12 @@ impl FileSystem for PassthroughFs {
             && xattr_name.eq("system.posix_acl_access")
         {
             let cap_guard = drop_effective_cap("FSETID")?;
-            let credentials_guard = set_creds(ctx.uid, ctx.gid)?;
+            let credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid).set()?;
 
-            // If `set_creds()` changes the effective user ID to non-zero, then the effective set is
-            // cleared from all capabilities. When switching back to root the permitted set is
-            // copied to the effective set. We need to keep `DAC_READ_SEARCH` to use file handles.
+            // If `UnixCredentials::set()` changes the effective user ID to non-zero, then the
+            // effective set is cleared from all capabilities. When switching back to root the
+            // permitted set is copied to the effective set. We need to keep `DAC_READ_SEARCH`
+            // to use file handles.
             if self.cfg.inode_file_handles != InodeFileHandlesMode::Never {
                 if let Err(e) = crate::util::add_cap_to_eff("DAC_READ_SEARCH") {
                     warn!(
@@ -2048,7 +2057,7 @@ impl FileSystem for PassthroughFs {
 
             (cap_guard, credentials_guard)
         } else {
-            (None, (None, None))
+            (None, None)
         };
 
         let res = if is_safe_inode(data.mode) {
