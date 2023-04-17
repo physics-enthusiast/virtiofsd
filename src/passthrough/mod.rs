@@ -932,7 +932,7 @@ impl PassthroughFs {
     ) -> io::Result<RawFd> {
         let fd = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, None)
+                .supplementary_gid(false, extensions.sup_gid)
                 .set()?;
             let _umask_guard = self
                 .posix_acl
@@ -1246,7 +1246,7 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, None)
+                .supplementary_gid(false, extensions.sup_gid)
                 .set()?;
             let _umask_guard = self
                 .posix_acl
@@ -1740,7 +1740,7 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, None)
+                .supplementary_gid(false, extensions.sup_gid)
                 .set()?;
             let _umask_guard = self
                 .posix_acl
@@ -1839,7 +1839,7 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, None)
+                .supplementary_gid(false, extensions.sup_gid)
                 .set()?;
 
             // Safe because this doesn't modify any memory and we check the return value.

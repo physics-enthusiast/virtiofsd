@@ -353,6 +353,7 @@ impl From<fuse::InHeader> for Context {
 #[derive(Clone, Default, Debug)]
 pub struct Extensions {
     pub secctx: Option<SecContext>,
+    pub sup_gid: Option<u32>,
 }
 
 /// Additional security context associated with requests.

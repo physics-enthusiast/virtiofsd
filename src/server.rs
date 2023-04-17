@@ -387,7 +387,10 @@ impl<F: FileSystem + Sync> Server<F> {
             bytes_to_cstr(linkname)?,
             in_header.nodeid.into(),
             bytes_to_cstr(name)?,
-            Extensions { secctx },
+            Extensions {
+                secctx,
+                sup_gid: None,
+            },
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -429,7 +432,10 @@ impl<F: FileSystem + Sync> Server<F> {
             mode,
             rdev,
             umask,
-            Extensions { secctx },
+            Extensions {
+                secctx,
+                sup_gid: None,
+            },
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -468,7 +474,10 @@ impl<F: FileSystem + Sync> Server<F> {
             bytes_to_cstr(name)?,
             mode,
             umask,
-            Extensions { secctx },
+            Extensions {
+                secctx,
+                sup_gid: None,
+            },
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -1349,7 +1358,10 @@ impl<F: FileSystem + Sync> Server<F> {
             kill_priv,
             flags,
             umask,
-            Extensions { secctx },
+            Extensions {
+                secctx,
+                sup_gid: None,
+            },
         ) {
             Ok((entry, handle, opts)) => {
                 let entry_out = EntryOut {
