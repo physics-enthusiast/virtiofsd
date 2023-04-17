@@ -375,22 +375,14 @@ impl<F: FileSystem + Sync> Server<F> {
 
         let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
 
-        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
-            let (_, secctx_data) = buf.split_at(name.len() + linkname.len());
-            parse_security_context(secctx_data)?
-        } else {
-            None
-        };
+        let extensions = get_extensions(options, name.len() + linkname.len(), buf.as_slice())?;
 
         match self.fs.symlink(
             Context::from(in_header),
             bytes_to_cstr(linkname)?,
             in_header.nodeid.into(),
             bytes_to_cstr(name)?,
-            Extensions {
-                secctx,
-                sup_gid: None,
-            },
+            extensions,
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -418,12 +410,7 @@ impl<F: FileSystem + Sync> Server<F> {
 
         let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
 
-        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
-            let (_, secctx_data) = buf.split_at(name.len());
-            parse_security_context(secctx_data)?
-        } else {
-            None
-        };
+        let extensions = get_extensions(options, name.len(), buf.as_slice())?;
 
         match self.fs.mknod(
             Context::from(in_header),
@@ -432,10 +419,7 @@ impl<F: FileSystem + Sync> Server<F> {
             mode,
             rdev,
             umask,
-            Extensions {
-                secctx,
-                sup_gid: None,
-            },
+            extensions,
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -461,12 +445,7 @@ impl<F: FileSystem + Sync> Server<F> {
 
         let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
 
-        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
-            let (_, secctx_data) = buf.split_at(name.len());
-            parse_security_context(secctx_data)?
-        } else {
-            None
-        };
+        let extensions = get_extensions(options, name.len(), buf.as_slice())?;
 
         match self.fs.mkdir(
             Context::from(in_header),
@@ -474,10 +453,7 @@ impl<F: FileSystem + Sync> Server<F> {
             bytes_to_cstr(name)?,
             mode,
             umask,
-            Extensions {
-                secctx,
-                sup_gid: None,
-            },
+            extensions,
         ) {
             Ok(entry) => {
                 let out = EntryOut::from(entry);
@@ -1341,12 +1317,7 @@ impl<F: FileSystem + Sync> Server<F> {
 
         let options = FsOptions::from_bits_truncate(self.options.load(Ordering::Relaxed));
 
-        let secctx = if options.contains(FsOptions::SECURITY_CTX) {
-            let (_, secctx_data) = buf.split_at(name.len());
-            parse_security_context(secctx_data)?
-        } else {
-            None
-        };
+        let extensions = get_extensions(options, name.len(), buf.as_slice())?;
 
         let kill_priv = open_flags & OPEN_KILL_SUIDGID != 0;
 
@@ -1358,10 +1329,7 @@ impl<F: FileSystem + Sync> Server<F> {
             kill_priv,
             flags,
             umask,
-            Extensions {
-                secctx,
-                sup_gid: None,
-            },
+            extensions,
         ) {
             Ok((entry, handle, opts)) => {
                 let entry_out = EntryOut {
@@ -1721,26 +1689,30 @@ fn add_dirent(
     }
 }
 
-fn parse_security_context(data: &[u8]) -> Result<Option<SecContext>> {
-    if data.len() < size_of::<SecctxHeader>() {
+fn take_object<T: ByteValued>(data: &[u8]) -> Result<(T, &[u8])> {
+    if data.len() < size_of::<T>() {
         return Err(Error::DecodeMessage(einval()));
     }
-    let (header, data) = data.split_at(size_of::<SecctxHeader>());
-    let secctx_header: SecctxHeader =
-        unsafe { std::ptr::read_unaligned(header.as_ptr() as *const SecctxHeader) };
 
-    if secctx_header.nr_secctx > 1 {
+    let (object_bytes, remaining_bytes) = data.split_at(size_of::<T>());
+    // SAFETY: `T` implements `ByteValued` that guarantees that it is safe to instantiate
+    // `T` with random data.
+    let object: T = unsafe { std::ptr::read_unaligned(object_bytes.as_ptr() as *const T) };
+    Ok((object, remaining_bytes))
+}
+
+fn parse_security_context(nr_secctx: u32, data: &[u8]) -> Result<Option<SecContext>> {
+    // Although the FUSE security context extension allows sending several security contexts,
+    // currently the guest kernel only sends one.
+    if nr_secctx > 1 {
         return Err(Error::DecodeMessage(einval()));
-    } else if secctx_header.nr_secctx == 0 {
+    } else if nr_secctx == 0 {
         // No security context sent. May be no LSM supports it.
         return Ok(None);
     }
 
-    if data.len() < size_of::<Secctx>() {
-        return Err(Error::DecodeMessage(einval()));
-    }
-    let (secctx_data, data) = data.split_at(size_of::<Secctx>());
-    let secctx: Secctx = unsafe { std::ptr::read_unaligned(secctx_data.as_ptr() as *const Secctx) };
+    let (secctx, data) = take_object::<Secctx>(data)?;
+
     if secctx.size == 0 {
         return Err(Error::DecodeMessage(einval()));
     }
@@ -1767,4 +1739,60 @@ fn parse_security_context(data: &[u8]) -> Result<Option<SecContext>> {
     };
 
     Ok(Some(fuse_secctx))
+}
+
+fn get_extensions(options: FsOptions, skip: usize, request_bytes: &[u8]) -> Result<Extensions> {
+    let mut extensions = Extensions::default();
+
+    if !options.contains(FsOptions::SECURITY_CTX) {
+        return Ok(extensions);
+    }
+
+    if request_bytes.len() <= skip {
+        return Err(Error::DecodeMessage(einval()));
+    }
+
+    // We need to track if a SecCtx was received, because it's valid
+    // for the guest to send an empty SecCtx (i.e, nr_secctx == 0)
+    let mut secctx_received = false;
+
+    let mut buf = &request_bytes[skip..];
+    while !buf.is_empty() {
+        let (extension_header, remaining_bytes) = take_object::<ExtHeader>(buf)?;
+
+        let extension_size = (extension_header.size as usize)
+            .checked_sub(size_of::<ExtHeader>())
+            .ok_or(Error::InvalidHeaderLength)?;
+
+        let (current_extension_bytes, next_extension_bytes) =
+            remaining_bytes.split_at(extension_size);
+
+        let ext_type = ExtType::try_from(extension_header.ext_type)
+            .map_err(|_| Error::DecodeMessage(einval()))?;
+
+        match ext_type {
+            ExtType::SecCtx(nr_secctx) => {
+                if !options.contains(FsOptions::SECURITY_CTX) || secctx_received {
+                    return Err(Error::DecodeMessage(einval()));
+                }
+
+                secctx_received = true;
+                extensions.secctx = parse_security_context(nr_secctx, current_extension_bytes)?;
+                debug!("Extension received: {} SecCtx", nr_secctx);
+            }
+            _ => {
+                return Err(Error::DecodeMessage(einval()));
+            }
+        }
+
+        // Let's process the next extension
+        buf = next_extension_bytes;
+    }
+
+    // A SecCtx is always sent in create/synlink/mknod/mkdir if supported
+    if options.contains(FsOptions::SECURITY_CTX) && !secctx_received {
+        return Err(Error::MissingExtension);
+    }
+
+    Ok(extensions)
 }
