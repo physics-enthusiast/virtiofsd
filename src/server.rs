@@ -667,6 +667,7 @@ impl<F: FileSystem + Sync> Server<F> {
                     unique: in_header.unique,
                 };
 
+                debug!("Replying OK, header: {:?}", out);
                 w.write_all(out.as_slice()).map_err(Error::EncodeMessage)?;
                 Ok(out.len as usize)
             }
@@ -1553,6 +1554,7 @@ fn reply_readdir(len: usize, unique: u64, mut w: Writer) -> Result<usize> {
         unique,
     };
 
+    debug!("Replying OK, header: {:?}", out);
     w.write_all(out.as_slice()).map_err(Error::EncodeMessage)?;
     w.flush().map_err(Error::FlushMessage)?;
     Ok(out.len as usize)
