@@ -631,14 +631,6 @@ impl<F: FileSystem + Sync> Server<F> {
             ..
         } = r.read_obj().map_err(Error::DecodeMessage)?;
 
-        if size > MAX_BUFFER_SIZE {
-            return reply_error(
-                io::Error::from_raw_os_error(libc::ENOMEM),
-                in_header.unique,
-                w,
-            );
-        }
-
         let owner = if read_flags & READ_LOCKOWNER != 0 {
             Some(lock_owner)
         } else {
@@ -685,14 +677,6 @@ impl<F: FileSystem + Sync> Server<F> {
             flags,
             ..
         } = r.read_obj().map_err(Error::DecodeMessage)?;
-
-        if size > MAX_BUFFER_SIZE {
-            return reply_error(
-                io::Error::from_raw_os_error(libc::ENOMEM),
-                in_header.unique,
-                w,
-            );
-        }
 
         let owner = if write_flags & WRITE_LOCKOWNER != 0 {
             Some(lock_owner)
