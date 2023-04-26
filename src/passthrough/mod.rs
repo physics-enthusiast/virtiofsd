@@ -319,6 +319,9 @@ pub struct PassthroughFs {
     // Basic facts about the OS
     os_facts: oslib::OsFacts,
 
+    // Whether the guest kernel supports the supplementary group extension.
+    sup_group_extension: AtomicBool,
+
     cfg: Config,
 }
 
@@ -361,6 +364,7 @@ impl PassthroughFs {
             writeback: AtomicBool::new(false),
             announce_submounts: AtomicBool::new(false),
             posix_acl: AtomicBool::new(false),
+            sup_group_extension: AtomicBool::new(false),
             os_facts: oslib::OsFacts::new(),
             cfg,
         };
@@ -932,7 +936,10 @@ impl PassthroughFs {
     ) -> io::Result<RawFd> {
         let fd = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, extensions.sup_gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
                 .set()?;
             let _umask_guard = self
                 .posix_acl
@@ -1155,6 +1162,11 @@ impl FileSystem for PassthroughFs {
                 return Err(io::Error::from_raw_os_error(libc::EPROTO));
             }
         }
+
+        if capable.contains(FsOptions::CREATE_SUPP_GROUP) {
+            self.sup_group_extension.store(true, Ordering::Relaxed);
+        }
+
         Ok(opts)
     }
 
@@ -1164,6 +1176,7 @@ impl FileSystem for PassthroughFs {
         self.writeback.store(false, Ordering::Relaxed);
         self.announce_submounts.store(false, Ordering::Relaxed);
         self.posix_acl.store(false, Ordering::Relaxed);
+        self.sup_group_extension.store(false, Ordering::Relaxed);
     }
 
     fn statfs(&self, _ctx: Context, inode: Inode) -> io::Result<libc::statvfs64> {
@@ -1246,7 +1259,10 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, extensions.sup_gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
                 .set()?;
             let _umask_guard = self
                 .posix_acl
@@ -1740,7 +1756,10 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, extensions.sup_gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
                 .set()?;
             let _umask_guard = self
                 .posix_acl
@@ -1839,7 +1858,10 @@ impl FileSystem for PassthroughFs {
 
         let res = {
             let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
-                .supplementary_gid(false, extensions.sup_gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
                 .set()?;
 
             // Safe because this doesn't modify any memory and we check the return value.
