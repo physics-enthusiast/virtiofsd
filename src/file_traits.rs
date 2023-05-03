@@ -94,8 +94,20 @@ macro_rules! volatile_impl {
                         offset as off64_t,
                     )
                 };
+
                 if ret >= 0 {
-                    Ok(ret as usize) // TODO: mark the written pages as dirty in the bitmap
+                    let mut total = 0;
+                    for vs in bufs {
+                        // Each `VolatileSlice` has a "local" bitmap (i.e., the offset 0 in the
+                        // bitmap corresponds to the beginning of the `VolatileSlice`)
+                        vs.bitmap()
+                            .mark_dirty(0, std::cmp::min(ret as usize - total, vs.len()));
+                        total += vs.len();
+                        if total >= ret as usize {
+                            break;
+                        }
+                    }
+                    Ok(ret as usize)
                 } else {
                     Err(Error::last_os_error())
                 }
