@@ -16,7 +16,7 @@ use vm_memory::{
     Le32, Le64, VolatileMemory, VolatileMemoryError, VolatileSlice,
 };
 
-use crate::file_traits::{FileReadWriteAtVolatile, FileReadWriteVolatile};
+use crate::file_traits::FileReadWriteAtVolatile;
 use crate::oslib;
 
 #[derive(Debug)]
@@ -243,19 +243,6 @@ impl<'a> Reader<'a> {
         Ok(unsafe { obj.assume_init() })
     }
 
-    /// Reads data from the descriptor chain buffer into a file descriptor.
-    /// Returns the number of bytes read from the descriptor chain buffer.
-    /// The number of bytes read can be less than `count` if there isn't
-    /// enough data in the descriptor chain buffer.
-    pub fn read_to<F: FileReadWriteVolatile>(
-        &mut self,
-        mut dst: F,
-        count: usize,
-    ) -> io::Result<usize> {
-        self.buffer
-            .consume(count, |bufs| dst.write_vectored_volatile(bufs))
-    }
-
     /// Reads data from the descriptor chain buffer into a File at offset `off`.
     /// Returns the number of bytes read from the descriptor chain buffer.
     /// The number of bytes read can be less than `count` if there isn't
@@ -270,28 +257,6 @@ impl<'a> Reader<'a> {
         self.buffer.consume(count, |bufs| {
             dst.write_vectored_at_volatile(bufs, off, flags)
         })
-    }
-
-    pub fn read_exact_to<F: FileReadWriteVolatile>(
-        &mut self,
-        mut dst: F,
-        mut count: usize,
-    ) -> io::Result<()> {
-        while count > 0 {
-            match self.read_to(&mut dst, count) {
-                Ok(0) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "failed to fill whole buffer",
-                    ))
-                }
-                Ok(n) => count -= n,
-                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(())
     }
 
     /// Returns number of bytes available for reading.  May return an error if the combined
@@ -397,19 +362,6 @@ impl<'a> Writer<'a> {
         self.buffer.available_bytes()
     }
 
-    /// Writes data to the descriptor chain buffer from a file descriptor.
-    /// Returns the number of bytes written to the descriptor chain buffer.
-    /// The number of bytes written can be less than `count` if
-    /// there isn't enough data in the descriptor chain buffer.
-    pub fn write_from<F: FileReadWriteVolatile>(
-        &mut self,
-        mut src: F,
-        count: usize,
-    ) -> io::Result<usize> {
-        self.buffer
-            .consume(count, |bufs| src.read_vectored_volatile(bufs))
-    }
-
     /// Writes data to the descriptor chain buffer from a File at offset `off`.
     /// Returns the number of bytes written to the descriptor chain buffer.
     /// The number of bytes written can be less than `count` if
@@ -422,28 +374,6 @@ impl<'a> Writer<'a> {
     ) -> io::Result<usize> {
         self.buffer
             .consume(count, |bufs| src.read_vectored_at_volatile(bufs, off))
-    }
-
-    pub fn write_all_from<F: FileReadWriteVolatile>(
-        &mut self,
-        mut src: F,
-        mut count: usize,
-    ) -> io::Result<()> {
-        while count > 0 {
-            match self.write_from(&mut src, count) {
-                Ok(0) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "failed to write whole buffer",
-                    ))
-                }
-                Ok(n) => count -= n,
-                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(())
     }
 
     /// Returns number of bytes already written to the descriptor chain buffer.
