@@ -11,6 +11,7 @@ use vm_memory::VolatileSlice;
 
 use crate::oslib;
 use libc::{c_int, c_void, off64_t, preadv64, size_t};
+use vm_memory::bitmap::BitmapSlice;
 
 /// A trait for setting the size of a file.
 /// This is equivalent to File's `set_len` method, but
@@ -29,31 +30,33 @@ impl FileSetLen for File {
 }
 
 /// A trait similar to the unix `ReadExt` and `WriteExt` traits, but for volatile memory.
-pub trait FileReadWriteAtVolatile {
+pub trait FileReadWriteAtVolatile<B: BitmapSlice> {
     /// Reads bytes from this file at `offset` into the given slice of buffers, returning the number
     /// of bytes read on success. Data is copied to fill each buffer in order, with the final buffer
     /// written to possibly being only partially filled.
-    fn read_vectored_at_volatile(&self, bufs: &[VolatileSlice], offset: u64) -> Result<usize>;
+    fn read_vectored_at_volatile(&self, bufs: &[&VolatileSlice<B>], offset: u64) -> Result<usize>;
 
     /// Writes bytes to this file at `offset` from the given slice of buffers, returning the number
     /// of bytes written on success. Data is copied from each buffer in order, with the final buffer
     /// read from possibly being only partially consumed.
     fn write_vectored_at_volatile(
         &self,
-        bufs: &[VolatileSlice],
+        bufs: &[&VolatileSlice<B>],
         offset: u64,
         flags: Option<oslib::WritevFlags>,
     ) -> Result<usize>;
 }
 
-impl<'a, T: FileReadWriteAtVolatile + ?Sized> FileReadWriteAtVolatile for &'a T {
-    fn read_vectored_at_volatile(&self, bufs: &[VolatileSlice], offset: u64) -> Result<usize> {
+impl<'a, B: BitmapSlice, T: FileReadWriteAtVolatile<B> + ?Sized> FileReadWriteAtVolatile<B>
+    for &'a T
+{
+    fn read_vectored_at_volatile(&self, bufs: &[&VolatileSlice<B>], offset: u64) -> Result<usize> {
         (**self).read_vectored_at_volatile(bufs, offset)
     }
 
     fn write_vectored_at_volatile(
         &self,
-        bufs: &[VolatileSlice],
+        bufs: &[&VolatileSlice<B>],
         offset: u64,
         flags: Option<oslib::WritevFlags>,
     ) -> Result<usize> {
@@ -63,10 +66,10 @@ impl<'a, T: FileReadWriteAtVolatile + ?Sized> FileReadWriteAtVolatile for &'a T 
 
 macro_rules! volatile_impl {
     ($ty:ty) => {
-        impl FileReadWriteAtVolatile for $ty {
+        impl<B: BitmapSlice> FileReadWriteAtVolatile<B> for $ty {
             fn read_vectored_at_volatile(
                 &self,
-                bufs: &[VolatileSlice],
+                bufs: &[&VolatileSlice<B>],
                 offset: u64,
             ) -> Result<usize> {
                 let iovecs: Vec<libc::iovec> = bufs
@@ -92,7 +95,7 @@ macro_rules! volatile_impl {
                     )
                 };
                 if ret >= 0 {
-                    Ok(ret as usize)
+                    Ok(ret as usize) // TODO: mark the written pages as dirty in the bitmap
                 } else {
                     Err(Error::last_os_error())
                 }
@@ -100,7 +103,7 @@ macro_rules! volatile_impl {
 
             fn write_vectored_at_volatile(
                 &self,
-                bufs: &[VolatileSlice],
+                bufs: &[&VolatileSlice<B>],
                 offset: u64,
                 flags: Option<oslib::WritevFlags>,
             ) -> Result<usize> {

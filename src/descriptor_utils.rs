@@ -11,6 +11,7 @@ use std::ptr::copy_nonoverlapping;
 use std::{cmp, result};
 
 use virtio_queue::DescriptorChain;
+use vm_memory::bitmap::{Bitmap, BitmapSlice};
 use vm_memory::{
     Address, ByteValued, GuestMemory, GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, Le16,
     Le32, Le64, VolatileMemory, VolatileMemoryError, VolatileSlice,
@@ -54,12 +55,12 @@ pub type Result<T> = result::Result<T, Error>;
 impl std::error::Error for Error {}
 
 #[derive(Clone)]
-struct DescriptorChainConsumer<'a> {
-    buffers: VecDeque<VolatileSlice<'a>>,
+struct DescriptorChainConsumer<'a, B> {
+    buffers: VecDeque<VolatileSlice<'a, B>>,
     bytes_consumed: usize,
 }
 
-impl<'a> DescriptorChainConsumer<'a> {
+impl<'a, B: BitmapSlice> DescriptorChainConsumer<'a, B> {
     fn available_bytes(&self) -> usize {
         // This is guaranteed not to overflow because the total length of the chain
         // is checked during all creations of `DescriptorChainConsumer` (see
@@ -84,11 +85,11 @@ impl<'a> DescriptorChainConsumer<'a> {
     /// the error is returned to the caller.
     fn consume<F>(&mut self, count: usize, f: F) -> io::Result<usize>
     where
-        F: FnOnce(&[VolatileSlice]) -> io::Result<usize>,
+        F: FnOnce(&[&VolatileSlice<B>]) -> io::Result<usize>,
     {
         let mut buflen = 0;
         let mut bufs = Vec::with_capacity(self.buffers.len());
-        for &vs in &self.buffers {
+        for vs in &self.buffers {
             if buflen >= count {
                 break;
             }
@@ -137,7 +138,7 @@ impl<'a> DescriptorChainConsumer<'a> {
         Ok(bytes_consumed)
     }
 
-    fn split_at(&mut self, offset: usize) -> Result<DescriptorChainConsumer<'a>> {
+    fn split_at(&mut self, offset: usize) -> Result<DescriptorChainConsumer<'a, B>> {
         let mut rem = offset;
         let pos = self.buffers.iter().position(|vs| {
             if rem < vs.len() {
@@ -183,13 +184,16 @@ impl<'a> DescriptorChainConsumer<'a> {
 /// Reader will skip iterating over descriptor chain when first writable
 /// descriptor is encountered.
 #[derive(Clone)]
-pub struct Reader<'a> {
-    buffer: DescriptorChainConsumer<'a>,
+pub struct Reader<'a, B = ()> {
+    buffer: DescriptorChainConsumer<'a, B>,
 }
 
-impl<'a> Reader<'a> {
+impl<'a, B: Bitmap + BitmapSlice + 'static> Reader<'a, B> {
     /// Construct a new Reader wrapper over `desc_chain`.
-    pub fn new<M>(mem: &'a GuestMemoryMmap, desc_chain: DescriptorChain<M>) -> Result<Reader<'a>>
+    pub fn new<M>(
+        mem: &'a GuestMemoryMmap<B>,
+        desc_chain: DescriptorChain<M>,
+    ) -> Result<Reader<'a, B>>
     where
         M: Deref,
         M::Target: GuestMemory + Sized,
@@ -217,7 +221,7 @@ impl<'a> Reader<'a> {
                     .get_slice(offset.raw_value() as usize, desc.len() as usize)
                     .map_err(Error::VolatileMemoryError)
             })
-            .collect::<Result<VecDeque<VolatileSlice<'a>>>>()?;
+            .collect::<Result<VecDeque<VolatileSlice<'a, B>>>>()?;
         Ok(Reader {
             buffer: DescriptorChainConsumer {
                 buffers,
@@ -247,7 +251,7 @@ impl<'a> Reader<'a> {
     /// Returns the number of bytes read from the descriptor chain buffer.
     /// The number of bytes read can be less than `count` if there isn't
     /// enough data in the descriptor chain buffer.
-    pub fn read_to_at<F: FileReadWriteAtVolatile>(
+    pub fn read_to_at<F: FileReadWriteAtVolatile<B>>(
         &mut self,
         dst: F,
         count: usize,
@@ -274,12 +278,12 @@ impl<'a> Reader<'a> {
     /// After the split, `self` will be able to read up to `offset` bytes while the returned
     /// `Reader` can read up to `available_bytes() - offset` bytes.  Returns an error if
     /// `offset > self.available_bytes()`.
-    pub fn split_at(&mut self, offset: usize) -> Result<Reader<'a>> {
+    pub fn split_at(&mut self, offset: usize) -> Result<Reader<'a, B>> {
         self.buffer.split_at(offset).map(|buffer| Reader { buffer })
     }
 }
 
-impl<'a> io::Read for Reader<'a> {
+impl<'a, B: BitmapSlice> io::Read for Reader<'a, B> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.buffer.consume(buf.len(), |bufs| {
             let mut rem = buf;
@@ -307,13 +311,16 @@ impl<'a> io::Read for Reader<'a> {
 /// Writer will start iterating the descriptors from the first writable one and will
 /// assume that all following descriptors are writable.
 #[derive(Clone)]
-pub struct Writer<'a> {
-    buffer: DescriptorChainConsumer<'a>,
+pub struct Writer<'a, B = ()> {
+    buffer: DescriptorChainConsumer<'a, B>,
 }
 
-impl<'a> Writer<'a> {
+impl<'a, B: Bitmap + BitmapSlice + 'static> Writer<'a, B> {
     /// Construct a new Writer wrapper over `desc_chain`.
-    pub fn new<M>(mem: &'a GuestMemoryMmap, desc_chain: DescriptorChain<M>) -> Result<Writer<'a>>
+    pub fn new<M>(
+        mem: &'a GuestMemoryMmap<B>,
+        desc_chain: DescriptorChain<M>,
+    ) -> Result<Writer<'a, B>>
     where
         M: Deref,
         M::Target: GuestMemory + Sized,
@@ -341,7 +348,7 @@ impl<'a> Writer<'a> {
                     .get_slice(offset.raw_value() as usize, desc.len() as usize)
                     .map_err(Error::VolatileMemoryError)
             })
-            .collect::<Result<VecDeque<VolatileSlice<'a>>>>()?;
+            .collect::<Result<VecDeque<VolatileSlice<'a, B>>>>()?;
 
         Ok(Writer {
             buffer: DescriptorChainConsumer {
@@ -366,7 +373,7 @@ impl<'a> Writer<'a> {
     /// Returns the number of bytes written to the descriptor chain buffer.
     /// The number of bytes written can be less than `count` if
     /// there isn't enough data in the descriptor chain buffer.
-    pub fn write_from_at<F: FileReadWriteAtVolatile>(
+    pub fn write_from_at<F: FileReadWriteAtVolatile<B>>(
         &mut self,
         src: F,
         count: usize,
@@ -385,12 +392,12 @@ impl<'a> Writer<'a> {
     /// After the split, `self` will be able to write up to `offset` bytes while the returned
     /// `Writer` can write up to `available_bytes() - offset` bytes.  Returns an error if
     /// `offset > self.available_bytes()`.
-    pub fn split_at(&mut self, offset: usize) -> Result<Writer<'a>> {
+    pub fn split_at(&mut self, offset: usize) -> Result<Writer<'a, B>> {
         self.buffer.split_at(offset).map(|buffer| Writer { buffer })
     }
 }
 
-impl<'a> io::Write for Writer<'a> {
+impl<'a, B: BitmapSlice> io::Write for Writer<'a, B> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.buffer.consume(buf.len(), |bufs| {
             let mut rem = buf;
