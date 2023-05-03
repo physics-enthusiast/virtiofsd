@@ -631,14 +631,6 @@ impl<F: FileSystem + Sync> Server<F> {
             ..
         } = r.read_obj().map_err(Error::DecodeMessage)?;
 
-        if size > MAX_BUFFER_SIZE {
-            return reply_error(
-                io::Error::from_raw_os_error(libc::ENOMEM),
-                in_header.unique,
-                w,
-            );
-        }
-
         let owner = if read_flags & READ_LOCKOWNER != 0 {
             Some(lock_owner)
         } else {
@@ -667,6 +659,7 @@ impl<F: FileSystem + Sync> Server<F> {
                     unique: in_header.unique,
                 };
 
+                debug!("Replying OK, header: {:?}", out);
                 w.write_all(out.as_slice()).map_err(Error::EncodeMessage)?;
                 Ok(out.len as usize)
             }
@@ -684,14 +677,6 @@ impl<F: FileSystem + Sync> Server<F> {
             flags,
             ..
         } = r.read_obj().map_err(Error::DecodeMessage)?;
-
-        if size > MAX_BUFFER_SIZE {
-            return reply_error(
-                io::Error::from_raw_os_error(libc::ENOMEM),
-                in_header.unique,
-                w,
-            );
-        }
 
         let owner = if write_flags & WRITE_LOCKOWNER != 0 {
             Some(lock_owner)
@@ -1553,6 +1538,7 @@ fn reply_readdir(len: usize, unique: u64, mut w: Writer) -> Result<usize> {
         unique,
     };
 
+    debug!("Replying OK, header: {:?}", out);
     w.write_all(out.as_slice()).map_err(Error::EncodeMessage)?;
     w.flush().map_err(Error::FlushMessage)?;
     Ok(out.len as usize)
