@@ -1741,14 +1741,30 @@ fn parse_security_context(nr_secctx: u32, data: &[u8]) -> Result<Option<SecConte
     Ok(Some(fuse_secctx))
 }
 
+fn parse_sup_groups(data: &[u8]) -> Result<u32> {
+    let (group_header, group_id_bytes) = take_object::<SuppGroups>(data)?;
+
+    // The FUSE extension allows sending several group IDs, but currently the guest
+    // kernel only sends one.
+    if group_header.nr_groups != 1 {
+        return Err(Error::DecodeMessage(einval()));
+    }
+
+    let (gid, _) = take_object::<u32>(group_id_bytes)?;
+    Ok(gid)
+}
+
 fn get_extensions(options: FsOptions, skip: usize, request_bytes: &[u8]) -> Result<Extensions> {
     let mut extensions = Extensions::default();
 
-    if !options.contains(FsOptions::SECURITY_CTX) {
+    if !(options.contains(FsOptions::SECURITY_CTX)
+        || options.contains(FsOptions::CREATE_SUPP_GROUP))
+    {
         return Ok(extensions);
     }
 
-    if request_bytes.len() <= skip {
+    // It's not guaranty to receive an extension even if it's supported by the guest kernel
+    if request_bytes.len() < skip {
         return Err(Error::DecodeMessage(einval()));
     }
 
@@ -1780,8 +1796,13 @@ fn get_extensions(options: FsOptions, skip: usize, request_bytes: &[u8]) -> Resu
                 extensions.secctx = parse_security_context(nr_secctx, current_extension_bytes)?;
                 debug!("Extension received: {} SecCtx", nr_secctx);
             }
-            _ => {
-                return Err(Error::DecodeMessage(einval()));
+            ExtType::SupGroups => {
+                if !options.contains(FsOptions::CREATE_SUPP_GROUP) || extensions.sup_gid.is_some() {
+                    return Err(Error::DecodeMessage(einval()));
+                }
+
+                extensions.sup_gid = parse_sup_groups(current_extension_bytes)?.into();
+                debug!("Extension received: SupGroups({:?})", extensions.sup_gid);
             }
         }
 
@@ -1789,7 +1810,8 @@ fn get_extensions(options: FsOptions, skip: usize, request_bytes: &[u8]) -> Resu
         buf = next_extension_bytes;
     }
 
-    // A SecCtx is always sent in create/synlink/mknod/mkdir if supported
+    // The SupGroup extension can be missing, since it is only sent if needed.
+    // A SecCtx is always sent in create/synlink/mknod/mkdir if supported.
     if options.contains(FsOptions::SECURITY_CTX) && !secctx_received {
         return Err(Error::MissingExtension);
     }
