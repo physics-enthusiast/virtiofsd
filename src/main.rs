@@ -850,6 +850,20 @@ fn drop_capabilities(inode_file_handles: InodeFileHandlesMode, modcaps: Option<S
     }
 }
 
+fn has_noatime_capability() -> bool {
+    // We may not have all permissions/capabilities to use O_NOATIME with all the exported files if
+    // we are running as unprivileged user and without any sandbox (e.g., --sandbox=none).
+    //
+    // Provide this helper function to check this particular case.
+    let uid = unsafe { libc::geteuid() };
+    let cap = capng::name_to_capability("FOWNER").unwrap_or_else(|err| {
+        error!("could not get capability FOWNER: {}", err);
+        process::exit(1);
+    });
+
+    uid == 0 || capng::have_capability(capng::Type::EFFECTIVE, cap)
+}
+
 fn main() {
     let opt = parse_compat(Opt::from_args());
 
@@ -1004,6 +1018,7 @@ fn main() {
         killpriv_v2,
         security_label: opt.security_label,
         posix_acl: opt.posix_acl,
+        clean_noatime: !has_noatime_capability(),
         ..Default::default()
     };
 
