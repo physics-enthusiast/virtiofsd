@@ -436,7 +436,9 @@ pub struct PassthroughFs {
     next_handle: AtomicU64,
 
     // Maps mount IDs to an open FD on the respective ID for the purpose of open_by_handle_at().
-    mount_fds: MountFds,
+    // This is set when inode_file_handles is not never, since in the 'never' case,
+    // open_by_handle_at() is not called.
+    mount_fds: Option<MountFds>,
 
     // File descriptor pointing to the `/proc/self/fd` directory. This is used to convert an fd from
     // `inodes` into one that can go into `handles`. This is accomplished by reading the
@@ -482,14 +484,19 @@ impl PassthroughFs {
             libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
         )?;
 
-        let mountinfo_fd = if let Some(fd) = cfg.proc_mountinfo_rawfd.take() {
-            fd
+        let mount_fds = if cfg.inode_file_handles == InodeFileHandlesMode::Never {
+            None
         } else {
-            openat(
-                &libc::AT_FDCWD,
-                "/proc/self/mountinfo",
-                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )?
+            let mountinfo_fd = if let Some(fd) = cfg.proc_mountinfo_rawfd.take() {
+                fd
+            } else {
+                openat(
+                    &libc::AT_FDCWD,
+                    "/proc/self/mountinfo",
+                    libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                )?
+            };
+            Some(MountFds::new(mountinfo_fd, cfg.mountinfo_prefix.clone()))
         };
 
         let mut fs = PassthroughFs {
@@ -497,7 +504,7 @@ impl PassthroughFs {
             next_inode: AtomicU64::new(fuse::ROOT_ID + 1),
             handles: RwLock::new(BTreeMap::new()),
             next_handle: AtomicU64::new(0),
-            mount_fds: MountFds::new(mountinfo_fd, cfg.mountinfo_prefix.clone()),
+            mount_fds,
             proc_self_fd,
             root_fd,
             writeback: AtomicBool::new(false),
@@ -646,7 +653,11 @@ impl PassthroughFs {
             // the respective filesystem (so we only log errors/warnings once).
             let err: MPRError = if st.mnt_id > 0 {
                 // Valid mount ID
-                self.mount_fds.error_for(st.mnt_id, io_err)
+                // self.mount_fds won't be None if we enter here.
+                self.mount_fds
+                    .as_ref()
+                    .unwrap()
+                    .error_for(st.mnt_id, io_err)
             } else {
                 // No valid mount ID, return error object not bound to a filesystem
                 io_err.into()
@@ -676,7 +687,8 @@ impl PassthroughFs {
     }
 
     fn make_file_handle_openable(&self, fh: &FileHandle) -> io::Result<OpenableFileHandle> {
-        fh.to_openable(&self.mount_fds, |fd, flags| {
+        // self.mount_fds won't be None if we enter here.
+        fh.to_openable(self.mount_fds.as_ref().unwrap(), |fd, flags| {
             reopen_fd_through_proc(&fd, flags, &self.proc_self_fd)
         })
         .map_err(|e| {
