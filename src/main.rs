@@ -631,6 +631,12 @@ struct Opt {
     /// into the namespace as [0, 65535].
     #[structopt(long)]
     gid_map: Option<GidMap>,
+
+    /// Preserve O_NOATIME behavior, otherwise automatically clean up O_NOATIME flag to prevent
+    /// potential permission errors when running in unprivileged mode (e.g., when accessing files
+    /// without having ownership/capability to use O_NOATIME).
+    #[structopt(long = "preserve-noatime")]
+    preserve_noatime: bool,
 }
 
 fn parse_compat(opt: Opt) -> Opt {
@@ -1018,7 +1024,7 @@ fn main() {
         killpriv_v2,
         security_label: opt.security_label,
         posix_acl: opt.posix_acl,
-        clean_noatime: !has_noatime_capability(),
+        clean_noatime: !opt.preserve_noatime && !has_noatime_capability(),
         ..Default::default()
     };
 
