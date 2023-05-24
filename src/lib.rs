@@ -43,6 +43,8 @@ pub enum Error {
     /// The `size` field of the `SetxattrIn` message does not match the length
     /// of the decoded value.
     InvalidXattrSize((u32, usize)),
+    /// One or more extensions are missing.
+    MissingExtension,
 }
 
 impl error::Error for Error {}
@@ -63,6 +65,7 @@ impl fmt::Display for Error {
                 "The `size` field of the `SetxattrIn` message does not match the length of the\
                  decoded value: size = {size}, value.len() = {len}"
             ),
+            MissingExtension => write!(f, "one or more extensions are missing"),
         }
     }
 }

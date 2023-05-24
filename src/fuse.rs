@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use std::convert::TryFrom;
 use std::mem;
 
 use crate::macros::enum_value;
@@ -12,7 +13,7 @@ use vm_memory::ByteValued;
 pub const KERNEL_VERSION: u32 = 7;
 
 /// Minor version number of this interface.
-pub const KERNEL_MINOR_VERSION: u32 = 36;
+pub const KERNEL_MINOR_VERSION: u32 = 38;
 
 /// Minimum Minor version number supported. If client sends a minor
 /// number lesser than this, we don't support it.
@@ -71,6 +72,9 @@ const FOPEN_STREAM: u32 = 16;
 /// Don't flush data cache on close (unless FUSE_WRITEBACK_CACHE)
 const FOPEN_NOFLUSH: u32 = 32;
 
+/// Allow concurrent direct writes on the same inode
+const FOPEN_PARALLEL_DIRECT_WRITES: u32 = 64;
+
 bitflags! {
     /// Options controlling the behavior of files opened by the server in response
     /// to an open or create request.
@@ -81,6 +85,7 @@ bitflags! {
         const CACHE_DIR = FOPEN_CACHE_DIR;
         const STREAM = FOPEN_CACHE_DIR;
         const NOFLUSH = FOPEN_NOFLUSH;
+        const PARALLEL_DIRECT_WRITES = FOPEN_PARALLEL_DIRECT_WRITES;
     }
 }
 
@@ -190,6 +195,10 @@ const SECURITY_CTX: u64 = 4_294_967_296;
 
 /// Use per inode DAX
 const HAS_INODE_DAX: u64 = 8_589_934_592;
+
+/// Add supplementary groups info to create, mkdir, symlink
+/// and mknod (single group that matches parent)
+const CREATE_SUPP_GROUP: u64 = 1 << 34;
 
 bitflags! {
     /// A bitfield passed in as a parameter to and returned from the `init` method of the
@@ -437,6 +446,10 @@ bitflags! {
         /// request. This will allow server to enable to
         /// enable dax on selective files.
         const HAS_INODE_DAX = HAS_INODE_DAX;
+
+        /// Add supplementary groups info to create, mkdir, symlink
+        /// and mknod (single group that matches parent).
+        const CREATE_SUPP_GROUP = CREATE_SUPP_GROUP;
     }
 }
 
@@ -699,6 +712,7 @@ enum_value! {
         SetupMapping = 48,
         RemoveMapping = 49,
         Syncfs = 50,
+        TmpFile = 51,
     }
 }
 
@@ -1142,7 +1156,8 @@ pub struct InHeader {
     pub uid: u32,
     pub gid: u32,
     pub pid: u32,
-    pub padding: u32,
+    pub total_extlen: u16, // length of extensions in 8-byte units
+    pub padding: u16,
 }
 unsafe impl ByteValued for InHeader {}
 
@@ -1183,12 +1198,19 @@ pub struct NotifyInvalInodeOut {
 }
 unsafe impl ByteValued for NotifyInvalInodeOut {}
 
+const FUSE_EXPIRE_ONLY: u32 = 1 << 0;
+bitflags! {
+    pub struct NotifyInvalEntryOutFlags: u32 {
+        const EXPIRE_ONLY = FUSE_EXPIRE_ONLY;
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct NotifyInvalEntryOut {
     pub parent: u64,
     pub namelen: u32,
-    pub padding: u32,
+    pub flags: u32,
 }
 unsafe impl ByteValued for NotifyInvalEntryOut {}
 
@@ -1310,6 +1332,49 @@ pub struct SyncfsIn {
 
 unsafe impl ByteValued for SyncfsIn {}
 
+/// Extension header
+/// `size`: total size of this extension including this header
+/// `ext_type`: type of extension
+/// This is made compatible with `SecctxHeader` by using type values > `FUSE_MAX_NR_SECCTX`
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct ExtHeader {
+    pub size: u32,
+    pub ext_type: u32,
+}
+
+/// Extension types
+/// Types `0..MAX_NR_SECCTX` are reserved for `SecCtx` extension for backward compatibility.
+const MAX_NR_SECCTX: u32 = 31; // Maximum value of `SecctxHeader::nr_secctx`
+const EXT_SUP_GROUPS: u32 = 32;
+
+unsafe impl ByteValued for ExtHeader {}
+
+/// Extension type
+#[derive(Debug, Copy, Clone)]
+pub enum ExtType {
+    /// Security contexts
+    SecCtx(u32),
+    /// `Supplementary groups
+    SupGroups,
+}
+
+impl TryFrom<u32> for ExtType {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            v if v <= MAX_NR_SECCTX => Ok(Self::SecCtx(value)),
+            v if v == EXT_SUP_GROUPS => Ok(Self::SupGroups),
+            _ => Err(()),
+        }
+    }
+}
+
+/// For each security context, send `Secctx` with size of security context
+/// `Secctx` will be followed by security context name and this in turn
+/// will be followed by actual context label.
+/// `Secctx`, name, context
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Secctx {
@@ -1319,6 +1384,9 @@ pub struct Secctx {
 
 unsafe impl ByteValued for Secctx {}
 
+/// Contains the information about how many `Secctx` structures are being
+/// sent and what's the total size of all security contexts (including
+/// size of `SecctxHeader`).
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct SecctxHeader {
@@ -1327,3 +1395,15 @@ pub struct SecctxHeader {
 }
 
 unsafe impl ByteValued for SecctxHeader {}
+
+/// Supplementary groups extension
+/// `nr_groups`: number of supplementary groups
+/// `groups`: flexible array of group IDs
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct SuppGroups {
+    pub nr_groups: u32,
+    // uint32_t	groups[];
+}
+
+unsafe impl ByteValued for SuppGroups {}

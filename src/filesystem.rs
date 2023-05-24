@@ -349,6 +349,13 @@ impl From<fuse::InHeader> for Context {
     }
 }
 
+/// Request extensions
+#[derive(Clone, Default, Debug)]
+pub struct Extensions {
+    pub secctx: Option<SecContext>,
+    pub sup_gid: Option<u32>,
+}
+
 /// Additional security context associated with requests.
 #[derive(Clone, Debug, Default)]
 pub struct SecContext {
@@ -514,7 +521,7 @@ pub trait FileSystem {
         linkname: &CStr,
         parent: Self::Inode,
         name: &CStr,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -539,7 +546,7 @@ pub trait FileSystem {
         mode: u32,
         rdev: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -559,7 +566,7 @@ pub trait FileSystem {
         name: &CStr,
         mode: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -703,7 +710,7 @@ pub trait FileSystem {
         kill_priv: bool,
         flags: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<(Entry, Option<Self::Handle>, OpenOptions)> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
@@ -1175,6 +1182,11 @@ pub trait FileSystem {
 
     /// TODO: support this
     fn notify_reply(&self) -> io::Result<()> {
+        Err(io::Error::from_raw_os_error(libc::ENOSYS))
+    }
+
+    /// TODO: support this
+    fn tmpfile(&self) -> io::Result<(Entry, Option<Self::Handle>, OpenOptions)> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
 }

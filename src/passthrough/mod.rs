@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+pub mod credentials;
 pub mod file_handle;
 pub mod inode_store;
 pub mod mount_fd;
@@ -11,11 +12,12 @@ pub mod xattrmap;
 
 use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::filesystem::{
-    Context, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions, SecContext,
-    SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
+    Context, Entry, Extensions, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions,
+    SecContext, SetattrValid, SetxattrFlags, ZeroCopyReader, ZeroCopyWriter,
 };
+use crate::passthrough::credentials::{drop_effective_cap, UnixCredentials};
 use crate::passthrough::inode_store::{Inode, InodeData, InodeFile, InodeIds, InodeStore};
-use crate::passthrough::util::{ebadf, einval, is_safe_inode, openat, reopen_fd_through_proc};
+use crate::passthrough::util::{ebadf, is_safe_inode, openat, reopen_fd_through_proc};
 use crate::read_dir::ReadDir;
 use crate::{fuse, oslib};
 use file_handle::{FileHandle, FileOrHandle, OpenableFileHandle};
@@ -42,150 +44,6 @@ type Handle = u64;
 struct HandleData {
     inode: Inode,
     file: RwLock<File>,
-}
-
-macro_rules! scoped_cred {
-    ($name:ident, $ty:ty, $syscall_nr:expr) => {
-        #[derive(Debug)]
-        struct $name;
-
-        impl $name {
-            // Changes the effective uid/gid of the current thread to `val`.  Changes
-            // the thread's credentials back to root when the returned struct is dropped.
-            fn new(val: $ty) -> io::Result<Option<$name>> {
-                if val == 0 {
-                    // Nothing to do since we are already uid 0.
-                    return Ok(None);
-                }
-
-                // We want credential changes to be per-thread because otherwise
-                // we might interfere with operations being carried out on other
-                // threads with different uids/gids.  However, posix requires that
-                // all threads in a process share the same credentials.  To do this
-                // libc uses signals to ensure that when one thread changes its
-                // credentials the other threads do the same thing.
-                //
-                // So instead we invoke the syscall directly in order to get around
-                // this limitation.  Another option is to use the setfsuid and
-                // setfsgid systems calls.   However since those calls have no way to
-                // return an error, it's preferable to do this instead.
-
-                // This call is safe because it doesn't modify any memory and we
-                // check the return value.
-                let res = unsafe { libc::syscall($syscall_nr, -1, val, -1) };
-                if res == 0 {
-                    Ok(Some($name))
-                } else {
-                    Err(io::Error::last_os_error())
-                }
-            }
-        }
-
-        impl Drop for $name {
-            fn drop(&mut self) {
-                let res = unsafe { libc::syscall($syscall_nr, -1, 0, -1) };
-                if res < 0 {
-                    error!(
-                        "failed to change credentials back to root: {}",
-                        io::Error::last_os_error(),
-                    );
-                }
-            }
-        }
-    };
-}
-scoped_cred!(ScopedUid, libc::uid_t, libc::SYS_setresuid);
-scoped_cred!(ScopedGid, libc::gid_t, libc::SYS_setresgid);
-
-fn set_creds(
-    uid: libc::uid_t,
-    gid: libc::gid_t,
-) -> io::Result<(Option<ScopedUid>, Option<ScopedGid>)> {
-    // We have to change the gid before we change the uid because if we change the uid first then we
-    // lose the capability to change the gid.  However changing back can happen in any order.
-    let creds_guard = ScopedGid::new(gid).and_then(|gid| Ok((ScopedUid::new(uid)?, gid)));
-
-    // We don't have access to process supplementary groups. To work around this
-    // we can set the `DAC_OVERRIDE` in the effective set. We are allowed to set
-    // the capability because `set_creds()` only changes the effective user ID,
-    // so we still have the 'DAC_OVERRIDE' in the permitted set. After switching
-    // back to root the permitted set is copied to the effective set, so no additional
-    // steps are required.
-    if let Err(e) = crate::util::add_cap_to_eff("DAC_OVERRIDE") {
-        warn!(
-            "failed to add 'DAC_OVERRIDE' to the effective set of capabilities: {}",
-            e
-        );
-    }
-
-    creds_guard
-}
-
-struct ScopedCaps {
-    cap: capng::Capability,
-}
-
-impl ScopedCaps {
-    fn new(cap_name: &str) -> io::Result<Option<Self>> {
-        use capng::{Action, CUpdate, Set, Type};
-
-        let cap = capng::name_to_capability(cap_name).map_err(|_| {
-            let err = io::Error::last_os_error();
-            error!(
-                "couldn't get the capability id for name {}: {:?}",
-                cap_name, err
-            );
-            err
-        })?;
-
-        if capng::have_capability(Type::EFFECTIVE, cap) {
-            let req = vec![CUpdate {
-                action: Action::DROP,
-                cap_type: Type::EFFECTIVE,
-                capability: cap,
-            }];
-            capng::update(req).map_err(|e| {
-                error!("couldn't drop {} capability: {:?}", cap, e);
-                einval()
-            })?;
-            capng::apply(Set::CAPS).map_err(|e| {
-                error!(
-                    "couldn't apply capabilities after dropping {}: {:?}",
-                    cap, e
-                );
-                einval()
-            })?;
-            Ok(Some(Self { cap }))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
-impl Drop for ScopedCaps {
-    fn drop(&mut self) {
-        use capng::{Action, CUpdate, Set, Type};
-
-        let req = vec![CUpdate {
-            action: Action::ADD,
-            cap_type: Type::EFFECTIVE,
-            capability: self.cap,
-        }];
-
-        if let Err(e) = capng::update(req) {
-            panic!("couldn't restore {} capability: {:?}", self.cap, e);
-        }
-        if let Err(e) = capng::apply(Set::CAPS) {
-            panic!(
-                "couldn't apply capabilities after restoring {}: {:?}",
-                self.cap, e
-            );
-        }
-    }
-}
-
-fn drop_effective_cap(cap_name: &str) -> io::Result<Option<ScopedCaps>> {
-    ScopedCaps::new(cap_name)
 }
 
 struct ScopedWorkingDirectory {
@@ -461,6 +319,9 @@ pub struct PassthroughFs {
     // Basic facts about the OS
     os_facts: oslib::OsFacts,
 
+    // Whether the guest kernel supports the supplementary group extension.
+    sup_group_extension: AtomicBool,
+
     cfg: Config,
 }
 
@@ -503,6 +364,7 @@ impl PassthroughFs {
             writeback: AtomicBool::new(false),
             announce_submounts: AtomicBool::new(false),
             posix_acl: AtomicBool::new(false),
+            sup_group_extension: AtomicBool::new(false),
             os_facts: oslib::OsFacts::new(),
             cfg,
         };
@@ -1070,10 +932,15 @@ impl PassthroughFs {
         mode: u32,
         flags: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<RawFd> {
         let fd = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
+                .set()?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1090,7 +957,7 @@ impl PassthroughFs {
         };
 
         // Set security context
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             // Remap security xattr name.
             let xattr_name = match self.map_client_xattrname(&secctx.name) {
                 Ok(xattr_name) => xattr_name,
@@ -1295,6 +1162,11 @@ impl FileSystem for PassthroughFs {
                 return Err(io::Error::from_raw_os_error(libc::EPROTO));
             }
         }
+
+        if capable.contains(FsOptions::CREATE_SUPP_GROUP) {
+            self.sup_group_extension.store(true, Ordering::Relaxed);
+        }
+
         Ok(opts)
     }
 
@@ -1304,6 +1176,7 @@ impl FileSystem for PassthroughFs {
         self.writeback.store(false, Ordering::Relaxed);
         self.announce_submounts.store(false, Ordering::Relaxed);
         self.posix_acl.store(false, Ordering::Relaxed);
+        self.sup_group_extension.store(false, Ordering::Relaxed);
     }
 
     fn statfs(&self, _ctx: Context, inode: Inode) -> io::Result<libc::statvfs64> {
@@ -1372,7 +1245,7 @@ impl FileSystem for PassthroughFs {
         name: &CStr,
         mode: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1385,7 +1258,12 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
+                .set()?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1399,7 +1277,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Set security context on dir.
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
                 unsafe {
                     libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR);
@@ -1470,7 +1348,7 @@ impl FileSystem for PassthroughFs {
         kill_priv: bool,
         flags: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<(Entry, Option<Handle>, OpenOptions)> {
         let data = self
             .inodes
@@ -1486,7 +1364,15 @@ impl FileSystem for PassthroughFs {
         // is later modified in the guest using `fcntl(F_SETFL)`. We do a per-write `O_APPEND`
         // check setting `RWF_APPEND` for non-mmapped writes, if necessary.
         let create_flags = flags & !(libc::O_APPEND as u32);
-        let fd = self.do_create(&ctx, &parent_file, name, mode, create_flags, umask, secctx);
+        let fd = self.do_create(
+            &ctx,
+            &parent_file,
+            name,
+            mode,
+            create_flags,
+            umask,
+            extensions,
+        );
 
         let (entry, handle) = match fd {
             Err(last_error) => {
@@ -1856,7 +1742,7 @@ impl FileSystem for PassthroughFs {
         mode: u32,
         rdev: u32,
         umask: u32,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1869,7 +1755,12 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
+                .set()?;
             let _umask_guard = self
                 .posix_acl
                 .load(Ordering::Relaxed)
@@ -1891,7 +1782,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Set security context on node.
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
                 unsafe {
                     libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
@@ -1953,7 +1844,7 @@ impl FileSystem for PassthroughFs {
         linkname: &CStr,
         parent: Inode,
         name: &CStr,
-        secctx: Option<SecContext>,
+        extensions: Extensions,
     ) -> io::Result<Entry> {
         let data = self
             .inodes
@@ -1966,7 +1857,12 @@ impl FileSystem for PassthroughFs {
         let parent_file = data.get_file()?;
 
         let res = {
-            let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
+            let _credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid)
+                .supplementary_gid(
+                    self.sup_group_extension.load(Ordering::Relaxed),
+                    extensions.sup_gid,
+                )
+                .set()?;
 
             // Safe because this doesn't modify any memory and we check the return value.
             unsafe { libc::symlinkat(linkname.as_ptr(), parent_file.as_raw_fd(), name.as_ptr()) }
@@ -1977,7 +1873,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Set security context on symlink.
-        if let Some(secctx) = secctx {
+        if let Some(secctx) = extensions.secctx {
             if let Err(e) = self.do_mknod_mkdir_symlink_secctx(&parent_file, name, &secctx) {
                 unsafe {
                     libc::unlinkat(parent_file.as_raw_fd(), name.as_ptr(), 0);
@@ -2166,11 +2062,12 @@ impl FileSystem for PassthroughFs {
             && xattr_name.eq("system.posix_acl_access")
         {
             let cap_guard = drop_effective_cap("FSETID")?;
-            let creds_guard = set_creds(ctx.uid, ctx.gid)?;
+            let credentials_guard = UnixCredentials::new(ctx.uid, ctx.gid).set()?;
 
-            // If `set_creds()` changes the effective user ID to non-zero, then the effective set is
-            // cleared from all capabilities. When switching back to root the permitted set is
-            // copied to the effective set. We need to keep `DAC_READ_SEARCH` to use file handles.
+            // If `UnixCredentials::set()` changes the effective user ID to non-zero, then the
+            // effective set is cleared from all capabilities. When switching back to root the
+            // permitted set is copied to the effective set. We need to keep `DAC_READ_SEARCH`
+            // to use file handles.
             if self.cfg.inode_file_handles != InodeFileHandlesMode::Never {
                 if let Err(e) = crate::util::add_cap_to_eff("DAC_READ_SEARCH") {
                     warn!(
@@ -2180,9 +2077,9 @@ impl FileSystem for PassthroughFs {
                 }
             }
 
-            (cap_guard, creds_guard)
+            (cap_guard, credentials_guard)
         } else {
-            (None, (None, None))
+            (None, None)
         };
 
         let res = if is_safe_inode(data.mode) {
