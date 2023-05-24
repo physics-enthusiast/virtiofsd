@@ -409,6 +409,7 @@ impl<'a, B: BitmapSlice> io::Write for Writer<'a, B> {
                 unsafe {
                     copy_nonoverlapping(rem.as_ptr(), vs.as_ptr(), copy_len);
                 }
+                vs.bitmap().mark_dirty(0, copy_len);
                 rem = &rem[copy_len..];
                 total += copy_len;
             }
