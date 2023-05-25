@@ -23,18 +23,18 @@ pub const MIN_KERNEL_MINOR_VERSION: u32 = 27;
 pub const ROOT_ID: u64 = 1;
 
 // Bitmasks for `fuse_setattr_in.valid`.
-const FATTR_MODE: u32 = 1;
-const FATTR_UID: u32 = 2;
-const FATTR_GID: u32 = 4;
-const FATTR_SIZE: u32 = 8;
-const FATTR_ATIME: u32 = 16;
-const FATTR_MTIME: u32 = 32;
-pub const FATTR_FH: u32 = 64;
-const FATTR_ATIME_NOW: u32 = 128;
-const FATTR_MTIME_NOW: u32 = 256;
-pub const FATTR_LOCKOWNER: u32 = 512;
-const FATTR_CTIME: u32 = 1024;
-const FATTR_KILL_SUIDGID: u32 = 2048;
+const FATTR_MODE: u32 = 1 << 0;
+const FATTR_UID: u32 = 1 << 1;
+const FATTR_GID: u32 = 1 << 2;
+const FATTR_SIZE: u32 = 1 << 3;
+const FATTR_ATIME: u32 = 1 << 4;
+const FATTR_MTIME: u32 = 1 << 5;
+pub const FATTR_FH: u32 = 1 << 6;
+const FATTR_ATIME_NOW: u32 = 1 << 7;
+const FATTR_MTIME_NOW: u32 = 1 << 8;
+pub const FATTR_LOCKOWNER: u32 = 1 << 9;
+const FATTR_CTIME: u32 = 1 << 10;
+const FATTR_KILL_SUIDGID: u32 = 1 << 11;
 
 bitflags! {
     pub struct SetattrValid: u32 {
@@ -54,26 +54,26 @@ bitflags! {
 // Flags returned by the OPEN request.
 
 /// Bypass page cache for this open file.
-const FOPEN_DIRECT_IO: u32 = 1;
+const FOPEN_DIRECT_IO: u32 = 1 << 0;
 
 /// Don't invalidate the data cache on open.
-const FOPEN_KEEP_CACHE: u32 = 2;
+const FOPEN_KEEP_CACHE: u32 = 1 << 1;
 
 /// The file is not seekable.
-const FOPEN_NONSEEKABLE: u32 = 4;
+const FOPEN_NONSEEKABLE: u32 = 1 << 2;
 
 /// Allow caching this directory.
-const FOPEN_CACHE_DIR: u32 = 8;
+const FOPEN_CACHE_DIR: u32 = 1 << 3;
 
 /// The file is stream-like (no file position at all).
 #[allow(dead_code)]
-const FOPEN_STREAM: u32 = 16;
+const FOPEN_STREAM: u32 = 1 << 4;
 
 /// Don't flush data cache on close (unless FUSE_WRITEBACK_CACHE)
-const FOPEN_NOFLUSH: u32 = 32;
+const FOPEN_NOFLUSH: u32 = 1 << 5;
 
 /// Allow concurrent direct writes on the same inode
-const FOPEN_PARALLEL_DIRECT_WRITES: u32 = 64;
+const FOPEN_PARALLEL_DIRECT_WRITES: u32 = 1 << 6;
 
 bitflags! {
     /// Options controlling the behavior of files opened by the server in response
@@ -92,109 +92,109 @@ bitflags! {
 // INIT request/reply flags.
 
 /// Asynchronous read requests.
-const ASYNC_READ: u64 = 1;
+const ASYNC_READ: u64 = 1 << 0;
 
 /// Remote locking for POSIX file locks.
-const POSIX_LOCKS: u64 = 2;
+const POSIX_LOCKS: u64 = 1 << 1;
 
 /// Kernel sends file handle for fstat, etc... (not yet supported).
-const FILE_OPS: u64 = 4;
+const FILE_OPS: u64 = 1 << 2;
 
 /// Handles the O_TRUNC open flag in the filesystem.
-const ATOMIC_O_TRUNC: u64 = 8;
+const ATOMIC_O_TRUNC: u64 = 1 << 3;
 
 /// FileSystem handles lookups of "." and "..".
-const EXPORT_SUPPORT: u64 = 16;
+const EXPORT_SUPPORT: u64 = 1 << 4;
 
 /// FileSystem can handle write size larger than 4kB.
-const BIG_WRITES: u64 = 32;
+const BIG_WRITES: u64 = 1 << 5;
 
 /// Don't apply umask to file mode on create operations.
-const DONT_MASK: u64 = 64;
+const DONT_MASK: u64 = 1 << 6;
 
 /// Kernel supports splice write on the device.
-const SPLICE_WRITE: u64 = 128;
+const SPLICE_WRITE: u64 = 1 << 7;
 
 /// Kernel supports splice move on the device.
-const SPLICE_MOVE: u64 = 256;
+const SPLICE_MOVE: u64 = 1 << 8;
 
 /// Kernel supports splice read on the device.
-const SPLICE_READ: u64 = 512;
+const SPLICE_READ: u64 = 1 << 9;
 
 /// Remote locking for BSD style file locks.
-const FLOCK_LOCKS: u64 = 1024;
+const FLOCK_LOCKS: u64 = 1 << 10;
 
 /// Kernel supports ioctl on directories.
-const HAS_IOCTL_DIR: u64 = 2048;
+const HAS_IOCTL_DIR: u64 = 1 << 11;
 
 /// Automatically invalidate cached pages.
-const AUTO_INVAL_DATA: u64 = 4096;
+const AUTO_INVAL_DATA: u64 = 1 << 12;
 
 /// Do READDIRPLUS (READDIR+LOOKUP in one).
-const DO_READDIRPLUS: u64 = 8192;
+const DO_READDIRPLUS: u64 = 1 << 13;
 
 /// Adaptive readdirplus.
-const READDIRPLUS_AUTO: u64 = 16384;
+const READDIRPLUS_AUTO: u64 = 1 << 14;
 
 /// Asynchronous direct I/O submission.
-const ASYNC_DIO: u64 = 32768;
+const ASYNC_DIO: u64 = 1 << 15;
 
 /// Use writeback cache for buffered writes.
-const WRITEBACK_CACHE: u64 = 65536;
+const WRITEBACK_CACHE: u64 = 1 << 16;
 
 /// Kernel supports zero-message opens.
-const NO_OPEN_SUPPORT: u64 = 131_072;
+const NO_OPEN_SUPPORT: u64 = 1 << 17;
 
 /// Allow parallel lookups and readdir.
-const PARALLEL_DIROPS: u64 = 262_144;
+const PARALLEL_DIROPS: u64 = 1 << 18;
 
 /// Fs handles killing suid/sgid/cap on write/chown/trunc.
-const HANDLE_KILLPRIV: u64 = 524_288;
+const HANDLE_KILLPRIV: u64 = 1 << 19;
 
 /// FileSystem supports posix acls.
-const POSIX_ACL: u64 = 1_048_576;
+const POSIX_ACL: u64 = 1 << 20;
 
 /// Reading the device after abort returns ECONNABORTED.
-const ABORT_ERROR: u64 = 2_097_152;
+const ABORT_ERROR: u64 = 1 << 21;
 
 /// Init_out.max_pages contains the max number of req pages.
-const MAX_PAGES: u64 = 4_194_304;
+const MAX_PAGES: u64 = 1 << 22;
 
 /// Cache READLINK responses
-const CACHE_SYMLINKS: u64 = 8_388_608;
+const CACHE_SYMLINKS: u64 = 1 << 23;
 
 /// Kernel supports zero-message opendir
-const NO_OPENDIR_SUPPORT: u64 = 16_777_216;
+const NO_OPENDIR_SUPPORT: u64 = 1 << 24;
 
 /// Only invalidate cached pages on explicit request
-const EXPLICIT_INVAL_DATA: u64 = 33_554_432;
+const EXPLICIT_INVAL_DATA: u64 = 1 << 25;
 
 /// init_out.map_alignment contains log2(byte alignment) for
 /// foffset and moffset fields in struct fuse_setupmapping_out and
 /// fuse_removemapping_one
 #[allow(dead_code)]
-const MAP_ALIGNMENT: u64 = 67_108_864;
+const MAP_ALIGNMENT: u64 = 1 << 26;
 
 /// Kernel supports auto-mounting directory submounts
-const SUBMOUNTS: u64 = 134_217_728;
+const SUBMOUNTS: u64 = 1 << 27;
 
 /// Fs handles killing suid/sgid/cap on write/chown/trunc (v2).
-const HANDLE_KILLPRIV_V2: u64 = 268_435_456;
+const HANDLE_KILLPRIV_V2: u64 = 1 << 28;
 
 /// Server supports extended struct SetxattrIn
-const SETXATTR_EXT: u64 = 536_870_912;
+const SETXATTR_EXT: u64 = 1 << 29;
 
 /// Extended fuse_init_in request
-const INIT_EXT: u64 = 1_073_741_824;
+const INIT_EXT: u64 = 1 << 30;
 
 /// Reserved. Do not use.
-const INIT_RESERVED: u64 = 2_147_483_648;
+const INIT_RESERVED: u64 = 1 << 31;
 
 /// Add security context to create, mkdir, symlink, and mknod
-const SECURITY_CTX: u64 = 4_294_967_296;
+const SECURITY_CTX: u64 = 1 << 32;
 
 /// Use per inode DAX
-const HAS_INODE_DAX: u64 = 8_589_934_592;
+const HAS_INODE_DAX: u64 = 1 << 33;
 
 /// Add supplementary groups info to create, mkdir, symlink
 /// and mknod (single group that matches parent)
@@ -454,48 +454,48 @@ bitflags! {
 }
 
 // Release flags.
-pub const RELEASE_FLUSH: u32 = 1;
-pub const RELEASE_FLOCK_UNLOCK: u32 = 2;
+pub const RELEASE_FLUSH: u32 = 1 << 0;
+pub const RELEASE_FLOCK_UNLOCK: u32 = 1 << 1;
 
 // Getattr flags.
-pub const GETATTR_FH: u32 = 1;
+pub const GETATTR_FH: u32 = 1 << 0;
 
 // Lock flags.
-pub const LK_FLOCK: u32 = 1;
+pub const LK_FLOCK: u32 = 1 << 0;
 
 // Write flags.
 
 /// Delayed write from page cache, file handle is guessed.
-pub const WRITE_CACHE: u32 = 1;
+pub const WRITE_CACHE: u32 = 1 << 0;
 
 /// `lock_owner` field is valid.
-pub const WRITE_LOCKOWNER: u32 = 2;
+pub const WRITE_LOCKOWNER: u32 = 1 << 1;
 
 /// Kill suid and sgid bits
-pub const WRITE_KILL_PRIV: u32 = 4;
+pub const WRITE_KILL_PRIV: u32 = 1 << 2;
 
 // Read flags.
-pub const READ_LOCKOWNER: u32 = 2;
+pub const READ_LOCKOWNER: u32 = 1 << 1;
 
 // Ioctl flags.
 
 /// 32bit compat ioctl on 64bit machine
-const IOCTL_COMPAT: u32 = 1;
+const IOCTL_COMPAT: u32 = 1 << 0;
 
 /// Not restricted to well-formed ioctls, retry allowed
-const IOCTL_UNRESTRICTED: u32 = 2;
+const IOCTL_UNRESTRICTED: u32 = 1 << 1;
 
 /// Retry with new iovecs
-const IOCTL_RETRY: u32 = 4;
+const IOCTL_RETRY: u32 = 1 << 2;
 
 /// 32bit ioctl
-const IOCTL_32BIT: u32 = 8;
+const IOCTL_32BIT: u32 = 1 << 3;
 
 /// Is a directory
-const IOCTL_DIR: u32 = 16;
+const IOCTL_DIR: u32 = 1 << 4;
 
 /// x32 compat ioctl on 64bit machine (64bit time_t)
-const IOCTL_COMPAT_X32: u32 = 32;
+const IOCTL_COMPAT_X32: u32 = 1 << 5;
 
 /// Maximum of in_iovecs + out_iovecs
 const IOCTL_MAX_IOV: u32 = 256;
@@ -526,7 +526,7 @@ bitflags! {
 }
 
 /// Request poll notify.
-pub const POLL_SCHEDULE_NOTIFY: u32 = 1;
+pub const POLL_SCHEDULE_NOTIFY: u32 = 1 << 0;
 
 /// The read buffer is required to be at least 8k, but may be much larger.
 pub const FUSE_MIN_READ_BUFFER: u32 = 8192;
@@ -541,22 +541,22 @@ pub const FUSE_COMPAT_22_INIT_OUT_SIZE: u32 = 24;
 pub const FUSE_COMPAT_SETXATTR_IN_SIZE: u32 = 8;
 
 // Fsync flags
-pub const FSYNC_FDATASYNC: u32 = 1;
+pub const FSYNC_FDATASYNC: u32 = 1 << 0;
 
 // Attr.flags flags.
 
 /// Object is a submount root
-pub const ATTR_SUBMOUNT: u32 = 1;
+pub const ATTR_SUBMOUNT: u32 = 1 << 0;
 /// Indicate to kernel to enable DAX for this file in per inode DAX mode
-pub const ATTR_DAX: u32 = 2;
+pub const ATTR_DAX: u32 = 1 << 1;
 
 // Open flags
 /// Kill suid and sgid if executable
-pub const OPEN_KILL_SUIDGID: u32 = 1;
+pub const OPEN_KILL_SUIDGID: u32 = 1 << 0;
 
 // setxattr flags
 /// Clear SGID when system.posix_acl_access is set
-const SETXATTR_ACL_KILL_SGID: u32 = 1;
+const SETXATTR_ACL_KILL_SGID: u32 = 1 << 0;
 
 bitflags! {
     pub struct SetxattrFlags: u32 {
@@ -1288,10 +1288,13 @@ pub struct CopyfilerangeIn {
 }
 unsafe impl ByteValued for CopyfilerangeIn {}
 
+const SETUPMAPPING_FLAG_WRITE: u64 = 1 << 0;
+const SETUPMAPPING_FLAG_READ: u64 = 1 << 1;
+
 bitflags! {
     pub struct SetupmappingFlags: u64 {
-    const WRITE = 0x1;
-    const READ = 0x2;
+    const WRITE = SETUPMAPPING_FLAG_WRITE;
+    const READ = SETUPMAPPING_FLAG_READ;
     }
 }
 
