@@ -13,6 +13,7 @@ use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use std::{env, error, fmt, io, process};
 use virtiofsd::idmap::{GidMap, UidMap};
 
@@ -896,6 +897,12 @@ fn main() {
         _ => !opt.no_readdirplus,
     };
 
+    let timeout = match opt.cache {
+        CachePolicy::Never => Duration::from_secs(0),
+        CachePolicy::Auto => Duration::from_secs(1),
+        CachePolicy::Always => Duration::from_secs(86400),
+    };
+
     let umask = if opt.socket_group.is_some() {
         libc::S_IROTH | libc::S_IWOTH | libc::S_IXOTH
     } else {
@@ -980,6 +987,8 @@ fn main() {
     });
 
     let fs_cfg = passthrough::Config {
+        entry_timeout: timeout,
+        attr_timeout: timeout,
         cache_policy: opt.cache,
         root_dir: sandbox.get_root_dir(),
         mountinfo_prefix: sandbox.get_mountinfo_prefix(),
