@@ -248,6 +248,10 @@ pub struct Config {
     ///
     /// The default is `false`.
     pub security_label: bool,
+
+    /// If `clean_noatime` is true automatically clean up O_NOATIME flag to prevent potential
+    /// permission errors.
+    pub clean_noatime: bool,
 }
 
 impl Default for Config {
@@ -271,6 +275,7 @@ impl Default for Config {
             killpriv_v2: false,
             posix_acl: false,
             security_label: false,
+            clean_noatime: true,
         }
     }
 }
@@ -741,7 +746,13 @@ impl PassthroughFs {
         // We need to clean the `O_APPEND` flag in case the file is mem mapped or if the flag
         // is later modified in the guest using `fcntl(F_SETFL)`. We do a per-write `O_APPEND`
         // check setting `RWF_APPEND` for non-mmapped writes, if necessary.
-        let flags = flags & !(libc::O_APPEND as u32);
+        let mut flags = flags & !(libc::O_APPEND as u32);
+
+        // Clean O_NOATIME (unless specified otherwise with --preserve-noatime) to prevent
+        // potential permission errors when running in unprivileged mode.
+        if self.cfg.clean_noatime {
+            flags &= !(libc::O_NOATIME as u32)
+        }
 
         let file = RwLock::new({
             let _killpriv_guard = if self.cfg.killpriv_v2 && kill_priv {
