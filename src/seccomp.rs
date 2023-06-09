@@ -168,6 +168,7 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_rt_sigprocmask);
     allow_syscall!(ctx, libc::SYS_rt_sigreturn);
     allow_syscall!(ctx, libc::SYS_sched_getaffinity); // used by thread_pool
+    allow_syscall!(ctx, libc::SYS_sched_yield);
     allow_syscall!(ctx, libc::SYS_sendmsg);
     allow_syscall!(ctx, libc::SYS_setgroups);
     allow_syscall!(ctx, libc::SYS_setresgid);
