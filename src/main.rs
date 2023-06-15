@@ -559,7 +559,7 @@ struct Opt {
     #[arg(long, require_equals = true, default_value = "never")]
     inode_file_handles: InodeFileHandlesCommandLineMode,
 
-    /// The caching policy the file system should use (auto, always, never)
+    /// The caching policy the file system should use (auto, always, never, metadata)
     #[arg(long, default_value = "auto")]
     cache: CachePolicy,
 
@@ -674,6 +674,7 @@ fn parse_compat(opt: Opt) -> Opt {
                 "auto" => opt.cache = CachePolicy::Auto,
                 "always" => opt.cache = CachePolicy::Always,
                 "none" => opt.cache = CachePolicy::Never,
+                "metadata" => opt.cache = CachePolicy::Metadata,
                 _ => value_error("cache", value),
             },
             ["loglevel", value] => match value {
@@ -925,6 +926,7 @@ fn main() {
 
     let timeout = match opt.cache {
         CachePolicy::Never => Duration::from_secs(0),
+        CachePolicy::Metadata => Duration::from_secs(86400),
         CachePolicy::Auto => Duration::from_secs(1),
         CachePolicy::Always => Duration::from_secs(86400),
     };
