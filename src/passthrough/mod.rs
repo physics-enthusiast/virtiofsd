@@ -793,9 +793,8 @@ impl PassthroughFs {
                 flags & (libc::O_DIRECTORY as u32) == 0,
             ),
             CachePolicy::Always => {
-                if flags & (libc::O_DIRECTORY as u32) == 0 {
-                    opts |= OpenOptions::KEEP_CACHE;
-                } else {
+                opts |= OpenOptions::KEEP_CACHE;
+                if flags & (libc::O_DIRECTORY as u32) != 0 {
                     opts |= OpenOptions::CACHE_DIR;
                 }
             }
