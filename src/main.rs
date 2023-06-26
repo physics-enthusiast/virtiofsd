@@ -17,6 +17,7 @@ use std::time::Duration;
 use std::{env, error, fmt, io, process};
 use virtiofsd::idmap::{GidMap, UidMap};
 
+use structopt::clap::AppSettings;
 use structopt::StructOpt;
 
 use vhost::vhost_user::message::*;
@@ -480,7 +481,11 @@ impl FromStr for InodeFileHandlesCommandLineMode {
 }
 
 #[derive(Clone, Debug, StructOpt)]
-#[structopt(name = "virtiofsd backend", about = "Launch a virtiofsd backend.")]
+#[structopt(
+    name = "virtiofsd backend",
+    about = "Launch a virtiofsd backend.",
+    global_settings = &[AppSettings::AllArgsOverrideSelf]
+)]
 struct Opt {
     /// Shared directory path
     #[structopt(long)]
