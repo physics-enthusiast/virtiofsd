@@ -21,11 +21,11 @@ use structopt::clap::AppSettings;
 use structopt::StructOpt;
 
 use vhost::vhost_user::message::*;
-use vhost::vhost_user::Error::PartialMessage;
-use vhost::vhost_user::{Listener, SlaveFsCacheReq};
+use vhost::vhost_user::Error::Disconnected;
+use vhost::vhost_user::{Listener, Slave};
 use vhost_user_backend::Error::HandleRequest;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, VringMutex, VringState, VringT};
-use virtio_bindings::bindings::virtio_net::*;
+use virtio_bindings::bindings::virtio_config::*;
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
@@ -107,7 +107,7 @@ struct VhostUserFsThread<F: FileSystem + Send + Sync + 'static> {
     kill_evt: EventFd,
     server: Arc<Server<F>>,
     // handle request from slave to master
-    vu_req: Option<SlaveFsCacheReq>,
+    vu_req: Option<Slave>,
     event_idx: bool,
     pool: Option<ThreadPool>,
 }
@@ -424,7 +424,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend<VringMutex> for Vho
         Some(self.thread.read().unwrap().kill_evt.try_clone().unwrap())
     }
 
-    fn set_slave_req_fd(&self, vu_req: SlaveFsCacheReq) {
+    fn set_slave_req_fd(&self, vu_req: Slave) {
         self.thread.write().unwrap().vu_req = Some(vu_req);
     }
 }
@@ -1082,7 +1082,7 @@ fn main() {
 
     if let Err(e) = daemon.wait() {
         match e {
-            HandleRequest(PartialMessage) => info!("Client disconnected, shutting down"),
+            HandleRequest(Disconnected) => info!("Client disconnected, shutting down"),
             _ => error!("Waiting for daemon failed: {:?}", e),
         }
     }

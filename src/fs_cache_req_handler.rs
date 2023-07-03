@@ -4,7 +4,7 @@ use std::os::unix::io::RawFd;
 use vhost::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VHOST_USER_FS_SLAVE_ENTRIES,
 };
-use vhost::vhost_user::{SlaveFsCacheReq, VhostUserMasterReqHandler};
+use vhost::vhost_user::{Slave, VhostUserMasterReqHandler};
 
 /// Trait for virtio-fs cache requests operations.  This is mainly used to hide
 /// vhost-user details from virtio-fs's fuse part.
@@ -23,7 +23,7 @@ pub trait FsCacheReqHandler: Send + Sync + 'static {
     fn unmap(&mut self, requests: Vec<fuse::RemovemappingOne>) -> io::Result<()>;
 }
 
-impl FsCacheReqHandler for SlaveFsCacheReq {
+impl FsCacheReqHandler for Slave {
     fn map(
         &mut self,
         foffset: u64,
