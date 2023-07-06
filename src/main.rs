@@ -504,7 +504,7 @@ struct Opt {
     socket_group: Option<String>,
 
     /// File descriptor for the listening socket
-    #[structopt(long, required_unless_one = &["socket", "socket-path", "print-capabilities"], conflicts_with_all = &["sock", "socket"])]
+    #[structopt(long, required_unless_one = &["socket", "socket-path", "print-capabilities"], conflicts_with_all = &["socket-path", "socket"])]
     fd: Option<RawFd>,
 
     /// Maximum thread pool size. A value of "0" disables the pool
@@ -948,7 +948,7 @@ fn main() {
 
             let socket = opt.socket_path.as_ref().unwrap_or_else(|| {
                 warn!("use of deprecated parameter '--socket': Please use the '--socket-path' option instead");
-                opt.socket.as_ref().unwrap() // safe to unwrap because clap ensures either --socket or --sock are passed
+                opt.socket.as_ref().unwrap() // safe to unwrap because clap ensures either --socket or --socket-path are passed
             });
 
             let pid_file_name = socket.to_owned() + ".pid";
