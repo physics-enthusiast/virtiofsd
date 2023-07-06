@@ -500,7 +500,7 @@ struct Opt {
     socket_path: Option<String>,
 
     /// Name of group for the vhost-user socket
-    #[structopt(long = "socket-group", conflicts_with_all = &["fd", "print-capabilites"])]
+    #[structopt(long = "socket-group", conflicts_with_all = &["fd", "print-capabilities"])]
     socket_group: Option<String>,
 
     /// File descriptor for the listening socket
