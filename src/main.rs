@@ -17,8 +17,7 @@ use std::time::Duration;
 use std::{env, error, fmt, io, process};
 use virtiofsd::idmap::{GidMap, UidMap};
 
-use structopt::clap::AppSettings;
-use structopt::StructOpt;
+use clap::{CommandFactory, Parser};
 
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Error::Disconnected;
@@ -480,64 +479,64 @@ impl FromStr for InodeFileHandlesCommandLineMode {
     }
 }
 
-#[derive(Clone, Debug, StructOpt)]
-#[structopt(
-    name = "virtiofsd backend",
+#[derive(Clone, Debug, Parser)]
+#[command(
+    name = "virtiofsd",
     about = "Launch a virtiofsd backend.",
-    global_settings = &[AppSettings::AllArgsOverrideSelf]
+    args_override_self = true
 )]
 struct Opt {
     /// Shared directory path
-    #[structopt(long)]
+    #[arg(long)]
     shared_dir: Option<String>,
 
     /// vhost-user socket path [deprecated]
-    #[structopt(long, required_unless_one = &["fd", "socket-path", "print-capabilities"])]
+    #[arg(long, required_unless_present_any = &["fd", "socket_path", "print_capabilities"])]
     socket: Option<String>,
 
     /// vhost-user socket path
-    #[structopt(long = "socket-path", required_unless_one = &["fd", "socket", "print-capabilities"])]
+    #[arg(long = "socket-path", required_unless_present_any = &["fd", "socket", "print_capabilities"])]
     socket_path: Option<String>,
 
     /// Name of group for the vhost-user socket
-    #[structopt(long = "socket-group", conflicts_with_all = &["fd", "print-capabilities"])]
+    #[arg(long = "socket-group", conflicts_with_all = &["fd", "print_capabilities"])]
     socket_group: Option<String>,
 
     /// File descriptor for the listening socket
-    #[structopt(long, required_unless_one = &["socket", "socket-path", "print-capabilities"], conflicts_with_all = &["socket-path", "socket"])]
+    #[arg(long, required_unless_present_any = &["socket", "socket_path", "print_capabilities"], conflicts_with_all = &["socket_path", "socket"])]
     fd: Option<RawFd>,
 
     /// Maximum thread pool size. A value of "0" disables the pool
-    #[structopt(long, default_value = "0")]
+    #[arg(long, default_value = "0")]
     thread_pool_size: usize,
 
     /// Enable support for extended attributes
-    #[structopt(long)]
+    #[arg(long)]
     xattr: bool,
 
     /// Enable support for posix ACLs (implies --xattr)
-    #[structopt(long)]
+    #[arg(long)]
     posix_acl: bool,
 
     /// Add custom rules for translating extended attributes between host and guest
     /// (e.g. :map::user.virtiofs.:)
-    #[structopt(long, parse(try_from_str = <XattrMap as TryFrom<&str>>::try_from))]
+    #[arg(long, value_parser = |s: &_| XattrMap::try_from(s))]
     xattrmap: Option<XattrMap>,
 
     /// Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
-    #[structopt(long, default_value = "namespace")]
+    #[arg(long, default_value = "namespace")]
     sandbox: SandboxMode,
 
     /// Action to take when seccomp finds a not allowed syscall (none, kill, log, trap)
-    #[structopt(long, parse(try_from_str = parse_seccomp), default_value = "kill")]
+    #[arg(long, value_parser = parse_seccomp, default_value = "kill")]
     seccomp: SeccompAction,
 
     /// Tell the guest which directories are mount points [default]
-    #[structopt(long)]
+    #[arg(long)]
     announce_submounts: bool,
 
     /// Do not tell the guest which directories are mount points
-    #[structopt(long, overrides_with("announce-submounts"))]
+    #[arg(long, overrides_with("announce_submounts"))]
     no_announce_submounts: bool,
 
     /// When to use file handles to reference inodes instead of O_PATH file descriptors (never,
@@ -556,69 +555,69 @@ struct Opt {
     /// not only helpful with resources, but may also be important in cases where virtiofsd should
     /// only have file descriptors open for files that are open in the guest, e.g. to get around
     /// bad interactions with NFS's silly renaming.
-    #[structopt(long, require_equals = true, default_value = "never")]
+    #[arg(long, require_equals = true, default_value = "never")]
     inode_file_handles: InodeFileHandlesCommandLineMode,
 
     /// The caching policy the file system should use (auto, always, never)
-    #[structopt(long, default_value = "auto")]
+    #[arg(long, default_value = "auto")]
     cache: CachePolicy,
 
     /// Disable support for READDIRPLUS operations
-    #[structopt(long)]
+    #[arg(long)]
     no_readdirplus: bool,
 
     /// Enable writeback cache
-    #[structopt(long)]
+    #[arg(long)]
     writeback: bool,
 
     /// Honor the O_DIRECT flag passed down by guest applications
-    #[structopt(long)]
+    #[arg(long)]
     allow_direct_io: bool,
 
     /// Print vhost-user.json backend program capabilities and exit
-    #[structopt(long = "print-capabilities")]
+    #[arg(long = "print-capabilities")]
     print_capabilities: bool,
 
     /// Modify the list of capabilities, e.g., --modcaps=+sys_admin:-chown
-    #[structopt(long)]
+    #[arg(long)]
     modcaps: Option<String>,
 
     /// Log level (error, warn, info, debug, trace, off)
-    #[structopt(long = "log-level", default_value = "info")]
+    #[arg(long = "log-level", default_value = "info")]
     log_level: LevelFilter,
 
     /// Log to syslog [default: stderr]
-    #[structopt(long)]
+    #[arg(long)]
     syslog: bool,
 
     /// Set maximum number of file descriptors (0 leaves rlimit unchanged)
     /// [default: min(1000000, '/proc/sys/fs/nr_open')]
-    #[structopt(long = "rlimit-nofile")]
+    #[arg(long = "rlimit-nofile")]
     rlimit_nofile: Option<u64>,
 
     /// Options in a format compatible with the legacy implementation [deprecated]
-    #[structopt(short = "o")]
+    #[arg(short = 'o')]
     compat_options: Option<Vec<String>>,
 
     /// Set log level to "debug" [deprecated]
-    #[structopt(short = "d")]
+    #[arg(short = 'd')]
     compat_debug: bool,
 
     /// Disable KILLPRIV V2 support [default]
-    #[structopt(long)]
+    #[arg(long)]
     _no_killpriv_v2: bool,
 
     /// Enable KILLPRIV V2 support
-    #[structopt(long, overrides_with("no-killpriv-v2"))]
+    #[arg(long, overrides_with("_no_killpriv_v2"))]
     killpriv_v2: bool,
 
     /// Compatibility option that has no effect [deprecated]
-    #[structopt(short = "f")]
+    #[arg(short = 'f')]
     compat_foreground: bool,
 
     /// Enable security label support. Expects SELinux xattr on file creation
     /// from client and stores it in the newly created file.
-    #[structopt(long = "security-label")]
+    #[arg(long = "security-label")]
     security_label: bool,
 
     /// Map a range of UIDs from the host into the namespace, given as
@@ -626,7 +625,7 @@ struct Opt {
     ///
     /// For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535]
     /// into the namespace as [0, 65535].
-    #[structopt(long)]
+    #[arg(long)]
     uid_map: Option<UidMap>,
 
     /// Map a range of GIDs from the host into the namespace, given as
@@ -634,31 +633,33 @@ struct Opt {
     ///
     /// For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535]
     /// into the namespace as [0, 65535].
-    #[structopt(long)]
+    #[arg(long)]
     gid_map: Option<GidMap>,
 
     /// Preserve O_NOATIME behavior, otherwise automatically clean up O_NOATIME flag to prevent
     /// potential permission errors when running in unprivileged mode (e.g., when accessing files
     /// without having ownership/capability to use O_NOATIME).
-    #[structopt(long = "preserve-noatime")]
+    #[arg(long = "preserve-noatime")]
     preserve_noatime: bool,
 }
 
 fn parse_compat(opt: Opt) -> Opt {
-    use structopt::clap::{Error, ErrorKind};
+    use clap::error::ErrorKind;
     fn value_error(arg: &str, value: &str) -> ! {
-        Error::with_description(
-            format!("Invalid compat value '{value}' for '-o {arg}'").as_str(),
-            ErrorKind::InvalidValue,
-        )
-        .exit()
+        <Opt as CommandFactory>::command()
+            .error(
+                ErrorKind::InvalidValue,
+                format!("Invalid compat value '{value}' for '-o {arg}'"),
+            )
+            .exit()
     }
     fn argument_error(arg: &str) -> ! {
-        Error::with_description(
-            format!("Invalid compat argument '-o {arg}'").as_str(),
-            ErrorKind::UnknownArgument,
-        )
-        .exit()
+        <Opt as CommandFactory>::command()
+            .error(
+                ErrorKind::UnknownArgument,
+                format!("Invalid compat argument '-o {arg}'"),
+            )
+            .exit()
     }
 
     fn parse_tuple(opt: &mut Opt, tuple: &str) {
@@ -876,7 +877,7 @@ fn has_noatime_capability() -> bool {
 }
 
 fn main() {
-    let opt = parse_compat(Opt::from_args());
+    let opt = parse_compat(Opt::parse());
 
     // Enable killpriv_v2 only if user explicitly asked for it by using
     // --killpriv-v2 or -o killpriv_v2. Otherwise disable it by default.

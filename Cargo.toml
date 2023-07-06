@@ -19,7 +19,7 @@ futures = { version = "0.3", features = ["thread-pool"] }
 libc = "0.2.139"
 log = "0.4"
 libseccomp-sys = "0.2"
-structopt = "0.3"
+clap = { version = "4", features = ["derive"] }
 vhost-user-backend = "0.10.0"
 vhost = "0.8.1"
 virtio-bindings = { version = "0.2", features = ["virtio-v5_0_0"] }
