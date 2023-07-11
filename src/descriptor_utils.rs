@@ -518,6 +518,7 @@ mod tests {
             .try_set_desc_table_address(descriptor_array_addr)
             .unwrap();
         queue.try_set_avail_ring_address(avail_ring).unwrap();
+        queue.set_ready(true);
         let desc = queue.iter(memory).unwrap().next().unwrap();
         Ok(desc.clone())
     }
