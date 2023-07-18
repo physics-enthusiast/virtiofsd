@@ -517,9 +517,9 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vhost"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73832f4d8d636d63d9b145e8ef22a2c50b93f4d24eb7a99c9e6781b1b08549cf"
+checksum = "61957aeb36daf0b00b87fff9c10dd28a161bd35ab157553d340d183b3d8756e6"
 dependencies = [
  "bitflags",
  "libc",
@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "virtiofsd"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "bitflags",
  "capng",
