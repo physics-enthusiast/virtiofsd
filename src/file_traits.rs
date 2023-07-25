@@ -131,12 +131,16 @@ macro_rules! volatile_impl {
                     return Ok(0);
                 }
 
-                oslib::writev_at(
-                    self.as_fd(),
-                    iovecs.as_slice(),
-                    offset.try_into().unwrap(),
-                    flags,
-                )
+                // SAFETY: Each `libc::iovec` element is created from a `VolatileSlice`
+                // of the guest memory.
+                unsafe {
+                    oslib::writev_at(
+                        self.as_fd(),
+                        iovecs.as_slice(),
+                        offset.try_into().unwrap(),
+                        flags,
+                    )
+                }
             }
         }
     };
