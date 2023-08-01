@@ -8,6 +8,7 @@ use std::mem::MaybeUninit;
 use std::os::unix::io::AsRawFd;
 
 mod file_status;
+use crate::oslib;
 use file_status::{statx_st, STATX_BASIC_STATS, STATX_MNT_ID};
 
 const EMPTY_CSTR: &[u8] = b"\0";
@@ -82,6 +83,15 @@ impl SafeStatXAccess for statx_st {
     }
 }
 
+fn get_mount_id(dir: &impl AsRawFd, path: &CStr) -> Option<MountId> {
+    let mut mount_id: libc::c_int = 0;
+    let mut c_fh = oslib::CFileHandle::default();
+
+    oslib::name_to_handle_at(dir, path, &mut c_fh, &mut mount_id, libc::AT_EMPTY_PATH)
+        .ok()
+        .and(Some(mount_id as MountId))
+}
+
 // Only works on Linux, and libc::SYS_statx is only defined for these
 // environments
 /// Performs a statx() syscall.  libc provides libc::statx() that does
@@ -122,11 +132,18 @@ pub fn statx(dir: &impl AsRawFd, path: Option<&CStr>) -> io::Result<StatExt> {
         // trait methods
         let stx = unsafe { stx_ui.assume_init() };
 
+        // if `statx()` doesn't provide the mount id (before kernel 5.8),
+        // let's try `name_to_handle_at()`, if everything fails just use 0
+        let mnt_id = stx
+            .mount_id()
+            .or_else(|| get_mount_id(dir, path))
+            .unwrap_or(0);
+
         Ok(StatExt {
             st: stx
                 .stat64()
                 .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOSYS))?,
-            mnt_id: stx.mount_id().unwrap_or(0),
+            mnt_id,
         })
     } else {
         Err(io::Error::last_os_error())
