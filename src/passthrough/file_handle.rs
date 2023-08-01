@@ -2,29 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use crate::oslib;
 use crate::passthrough::mount_fd::{MPRResult, MountFd, MountFds};
 use crate::passthrough::stat::MountId;
 use std::ffi::CStr;
 use std::fs::File;
 use std::io;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 
-const MAX_HANDLE_SZ: usize = 128;
 const EMPTY_CSTR: &[u8] = b"\0";
-
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq)]
-#[repr(C)]
-struct CFileHandle {
-    handle_bytes: libc::c_uint,
-    handle_type: libc::c_int,
-    f_handle: [libc::c_char; MAX_HANDLE_SZ],
-}
 
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub struct FileHandle {
     mnt_id: MountId,
-    handle: CFileHandle,
+    handle: oslib::CFileHandle,
 }
 
 pub struct OpenableFileHandle {
@@ -35,24 +27,6 @@ pub struct OpenableFileHandle {
 pub enum FileOrHandle {
     File(File),
     Handle(OpenableFileHandle),
-}
-
-extern "C" {
-    fn name_to_handle_at(
-        dirfd: libc::c_int,
-        pathname: *const libc::c_char,
-        file_handle: *mut CFileHandle,
-        mount_id: *mut libc::c_int,
-        flags: libc::c_int,
-    ) -> libc::c_int;
-
-    // Technically `file_handle` should be a `mut` pointer, but `open_by_handle_at()` is specified
-    // not to change it, so we can declare it `const`.
-    fn open_by_handle_at(
-        mount_fd: libc::c_int,
-        file_handle: *const CFileHandle,
-        flags: libc::c_int,
-    ) -> libc::c_int;
 }
 
 impl FileHandle {
@@ -67,28 +41,11 @@ impl FileHandle {
     /// Return an `io::Error` for all other errors.
     pub fn from_name_at(dir: &impl AsRawFd, path: &CStr) -> io::Result<Option<Self>> {
         let mut mount_id: libc::c_int = 0;
-        let mut c_fh = CFileHandle {
-            handle_bytes: MAX_HANDLE_SZ as libc::c_uint,
-            handle_type: 0,
-            f_handle: [0; MAX_HANDLE_SZ],
-        };
+        let mut c_fh = oslib::CFileHandle::default();
 
-        let ret = unsafe {
-            name_to_handle_at(
-                dir.as_raw_fd(),
-                path.as_ptr(),
-                &mut c_fh,
-                &mut mount_id,
-                libc::AT_EMPTY_PATH,
-            )
-        };
-        if ret == 0 {
-            Ok(Some(FileHandle {
-                mnt_id: mount_id as MountId,
-                handle: c_fh,
-            }))
-        } else {
-            let err = io::Error::last_os_error();
+        if let Err(err) =
+            oslib::name_to_handle_at(dir, path, &mut c_fh, &mut mount_id, libc::AT_EMPTY_PATH)
+        {
             match err.raw_os_error() {
                 // Filesystem does not support file handles
                 Some(libc::EOPNOTSUPP) => Ok(None),
@@ -97,6 +54,11 @@ impl FileHandle {
                 // Other error
                 _ => Err(err),
             }
+        } else {
+            Ok(Some(FileHandle {
+                mnt_id: mount_id as MountId,
+                handle: c_fh,
+            }))
         }
     }
 
@@ -135,29 +97,9 @@ impl OpenableFileHandle {
     }
 
     /**
-     * Open a file handle (low-level wrapper).
-     *
-     * `mount_fd` must be an open non-`O_PATH` file descriptor for an inode on the same mount as
-     * the file to be opened, i.e. the mount given by `self.handle.mnt_id`.
-     */
-    fn do_open(&self, mount_fd: &impl AsRawFd, flags: libc::c_int) -> io::Result<File> {
-        let ret = unsafe { open_by_handle_at(mount_fd.as_raw_fd(), &self.handle.handle, flags) };
-        if ret >= 0 {
-            // Safe because `open_by_handle_at()` guarantees this is a valid fd
-            let file = unsafe { File::from_raw_fd(ret) };
-            Ok(file)
-        } else {
-            Err(io::Error::last_os_error())
-        }
-    }
-
-    /**
      * Open a file handle, using our mount FDs hash map.
-     *
-     * Look up `self.handle.mnt_id` in `self.mount_fd_map`, and pass the result to
-     * `self.do_open()`.
      */
     pub fn open(&self, flags: libc::c_int) -> io::Result<File> {
-        self.do_open(self.mount_fd.file(), flags)
+        oslib::open_by_handle_at(self.mount_fd.file(), &self.handle.handle, flags)
     }
 }
