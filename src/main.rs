@@ -913,7 +913,6 @@ fn main() {
         warn!("Use of deprecated value 'fallback' for '--inode-file-handles': Please use 'prefer' instead");
     }
 
-    let sandbox_mode = opt.sandbox.clone();
     let xattrmap = opt.xattrmap.clone();
     let xattr = xattrmap.is_some() || opt.posix_acl || opt.xattr;
     let thread_pool_size = opt.thread_pool_size;
@@ -995,7 +994,7 @@ fn main() {
 
     let mut sandbox = Sandbox::new(
         shared_dir.to_string(),
-        sandbox_mode,
+        opt.sandbox,
         opt.uid_map,
         opt.gid_map,
     )
