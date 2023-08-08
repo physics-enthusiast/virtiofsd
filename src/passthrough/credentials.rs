@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+
 use crate::oslib;
 use crate::passthrough::util::einval;
 use std::io;
