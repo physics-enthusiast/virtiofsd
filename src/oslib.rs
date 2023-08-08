@@ -378,7 +378,7 @@ mod writev_test {
 ///
 /// The caller must ensure that each iovec element is valid (i.e., it has a valid `iov_base`
 /// pointer and `iov_len`).
-pub fn writev_at(
+pub unsafe fn writev_at(
     fd: BorrowedFd,
     iovecs: &[libc::iovec],
     offset: i64,
