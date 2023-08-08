@@ -118,7 +118,7 @@ impl fmt::Display for Error {
 }
 
 /// Mechanism to be used for setting up the sandbox.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SandboxMode {
     /// Create the sandbox using Linux namespaces.
     Namespace,
