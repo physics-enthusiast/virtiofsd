@@ -657,8 +657,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3750e9b70da7f2ce2f7bf942c886d45f9bae064135c398f05635bf77e926a2ef"
 dependencies = [
  "arc-swap",
+ "bitflags 1.3.2",
  "libc",
  "thiserror",
+ "vmm-sys-util",
  "winapi",
 ]
 
