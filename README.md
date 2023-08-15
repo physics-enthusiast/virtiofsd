@@ -167,6 +167,17 @@ preserve the `O_NOATIME` flag specified by the client.
 Shared directory path.
 
 ```shell
+--tag <tag>
+```
+The tag that the virtio device advertises.
+
+Setting this option will enable advertising of VHOST_USER_PROTOCOL_F_CONFIG.
+However, the vhost-user frontend of your hypervisor may not negotiate this
+feature and (or) ignore this value. Notably, QEMU currently (as of 8.1) ignores
+the CONFIG feature. QEMU versions from 7.1 to 8.0 will crash while attempting to
+log a warning about not supporting the feature.
+
+```shell
 --socket-group <socket-group>
 ```
 Name of group for the vhost-user socket.
