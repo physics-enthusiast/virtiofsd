@@ -483,6 +483,7 @@ impl FromStr for InodeFileHandlesCommandLineMode {
 #[command(
     name = "virtiofsd",
     about = "Launch a virtiofsd backend.",
+    version,
     args_override_self = true
 )]
 struct Opt {
