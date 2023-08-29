@@ -122,6 +122,7 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_getegid);
     allow_syscall!(ctx, libc::SYS_geteuid);
     allow_syscall!(ctx, libc::SYS_getpid);
+    allow_syscall!(ctx, libc::SYS_getrandom);
     allow_syscall!(ctx, libc::SYS_gettid);
     allow_syscall!(ctx, libc::SYS_gettimeofday);
     allow_syscall!(ctx, libc::SYS_getxattr);
