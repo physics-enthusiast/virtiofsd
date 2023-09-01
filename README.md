@@ -324,7 +324,7 @@ host# qemu-system \
         -device virtio-blk,drive=hdd \
         -chardev socket,id=char0,path=/tmp/vfsd.sock \
         -device vhost-user-fs-pci,queue-size=1024,chardev=char0,tag=myfs \
-        -object memory-backend-file,id=mem,size=4G,mem-path=/dev/shm,share=on \
+        -object memory-backend-memfd,id=mem,size=4G,share=on \
         -numa node,memdev=mem \
         -accel kvm -m 4G
 
