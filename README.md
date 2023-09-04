@@ -245,7 +245,7 @@ Default: kill.
 ```shell
 --cache <cache>
 ```
-The caching policy the file system should use (auto, always, never).
+The caching policy the file system should use (auto, always, metadata, never).
 
 Default: auto.
 
