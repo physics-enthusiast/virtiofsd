@@ -102,11 +102,11 @@ impl FromStr for CachePolicy {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "never" | "Never" | "NEVER" => Ok(CachePolicy::Never),
-            "metadata" | "Metadata" | "METADATA" => Ok(CachePolicy::Metadata),
-            "auto" | "Auto" | "AUTO" => Ok(CachePolicy::Auto),
-            "always" | "Always" | "ALWAYS" => Ok(CachePolicy::Always),
+        match &s.to_lowercase()[..] {
+            "never" => Ok(CachePolicy::Never),
+            "metadata" => Ok(CachePolicy::Metadata),
+            "auto" => Ok(CachePolicy::Auto),
+            "always" => Ok(CachePolicy::Always),
             _ => Err("invalid cache policy"),
         }
     }
