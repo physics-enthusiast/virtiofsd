@@ -37,17 +37,26 @@ use virtiofsd::seccomp::{enable_seccomp, SeccompAction};
 use virtiofsd::server::Server;
 use virtiofsd::util::write_pid_file;
 use virtiofsd::{limits, oslib, Error as VhostUserFsError};
-use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
+use vm_memory::{
+    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32,
+};
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: usize = 1024;
-const NUM_QUEUES: usize = 2;
+// The spec allows for multiple request queues. We currently only support one.
+const REQUEST_QUEUES: u32 = 1;
+// In addition to the request queue there is one high-prio queue.
+// Since VIRTIO_FS_F_NOTIFICATION is not advertised we do not have a
+// notification queue.
+const NUM_QUEUES: usize = REQUEST_QUEUES as usize + 1;
 
 // The guest queued an available buffer for the high priority queue.
 const HIPRIO_QUEUE_EVENT: u16 = 0;
 // The guest queued an available buffer for the request queue.
 const REQ_QUEUE_EVENT: u16 = 1;
+
+const MAX_TAG_LEN: usize = 36;
 
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
@@ -74,6 +83,8 @@ enum Error {
     QueueWriter(VufDescriptorError),
     /// The unshare(CLONE_FS) call failed.
     UnshareCloneFs(io::Error),
+    /// Invalid tag name
+    InvalidTag,
 }
 
 impl fmt::Display for Error {
@@ -88,6 +99,10 @@ impl fmt::Display for Error {
                     runtime seccomp policy allows unshare."
                 )
             }
+            Self::InvalidTag => write!(
+                f,
+                "The tag may not be empty or longer than {MAX_TAG_LEN} bytes (encoded as UTF-8)."
+            ),
             _ => write!(f, "{self:?}"),
         }
     }
@@ -355,14 +370,35 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct VirtioFsConfig {
+    tag: [u8; MAX_TAG_LEN],
+    num_request_queues: Le32,
+}
+
+// vm-memory needs a Default implementation even though these values are never
+// used anywhere...
+impl Default for VirtioFsConfig {
+    fn default() -> Self {
+        Self {
+            tag: [0; MAX_TAG_LEN],
+            num_request_queues: Le32::default(),
+        }
+    }
+}
+
+unsafe impl ByteValued for VirtioFsConfig {}
+
 struct VhostUserFsBackend<F: FileSystem + Send + Sync + 'static> {
     thread: RwLock<VhostUserFsThread<F>>,
+    tag: Option<String>,
 }
 
 impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
-    fn new(fs: F, thread_pool_size: usize) -> Result<Self> {
+    fn new(fs: F, thread_pool_size: usize, tag: Option<String>) -> Result<Self> {
         let thread = RwLock::new(VhostUserFsThread::new(fs, thread_pool_size)?);
-        Ok(VhostUserFsBackend { thread })
+        Ok(VhostUserFsBackend { thread, tag })
     }
 }
 
@@ -383,11 +419,50 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend<VringMutex> for Vho
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ
+        let mut protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::SLAVE_REQ
             | VhostUserProtocolFeatures::SLAVE_SEND_FD
             | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
+
+        if self.tag.is_some() {
+            protocol_features |= VhostUserProtocolFeatures::CONFIG;
+        }
+
+        protocol_features
+    }
+
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        // virtio spec 1.2, 5.11.4:
+        //   The tag is encoded in UTF-8 and padded with NUL bytes if shorter than
+        //   the available space. This field is not NUL-terminated if the encoded
+        //   bytes take up the entire field.
+        // The length was already checked when parsing the arguments. Hence, we
+        // only assert that everything looks sane and pad with NUL bytes to the
+        // fixed length.
+        let tag = self.tag.as_ref().expect("Did not expect read of config if tag is not set. We do not advertise F_CONFIG in that case!");
+        assert!(tag.len() <= MAX_TAG_LEN, "too long tag length");
+        assert!(!tag.is_empty(), "tag should not be empty");
+        let mut fixed_len_tag = [0; MAX_TAG_LEN];
+        fixed_len_tag[0..tag.len()].copy_from_slice(tag.as_bytes());
+
+        let config = VirtioFsConfig {
+            tag: fixed_len_tag,
+            num_request_queues: Le32::from(REQUEST_QUEUES),
+        };
+
+        let offset = offset as usize;
+        let size = size as usize;
+        let mut result: Vec<_> = config
+            .as_slice()
+            .iter()
+            .skip(offset)
+            .take(size)
+            .copied()
+            .collect();
+        // pad with 0s up to `size`
+        result.resize(size, 0);
+        result
     }
 
     fn set_event_idx(&self, enabled: bool) {
@@ -479,6 +554,14 @@ impl FromStr for InodeFileHandlesCommandLineMode {
     }
 }
 
+fn parse_tag(tag: &str) -> Result<String> {
+    if !tag.is_empty() && tag.len() <= MAX_TAG_LEN {
+        Ok(tag.into())
+    } else {
+        Err(Error::InvalidTag)
+    }
+}
+
 #[derive(Clone, Debug, Parser)]
 #[command(
     name = "virtiofsd",
@@ -490,6 +573,17 @@ struct Opt {
     /// Shared directory path
     #[arg(long)]
     shared_dir: Option<String>,
+
+    /// The tag that the virtio device advertises
+    ///
+    /// Setting this option will enable advertising of
+    /// VHOST_USER_PROTOCOL_F_CONFIG. However, the vhost-user frontend of your
+    /// hypervisor may not negotiate this feature and (or) ignore this value.
+    /// Notably, QEMU currently (as of 8.1) ignores the CONFIG feature. QEMU
+    /// versions from 7.1 to 8.0 will crash while attempting to log a warning
+    /// about not supporting the feature.
+    #[arg(long, value_parser = parse_tag)]
+    tag: Option<String>,
 
     /// vhost-user socket path [deprecated]
     #[arg(long, required_unless_present_any = &["fd", "socket_path", "print_capabilities"])]
@@ -1061,7 +1155,7 @@ fn main() {
     };
 
     let fs_backend = Arc::new(
-        VhostUserFsBackend::new(fs, thread_pool_size).unwrap_or_else(|error| {
+        VhostUserFsBackend::new(fs, thread_pool_size, opt.tag).unwrap_or_else(|error| {
             error!("Error creating vhost-user backend: {}", error);
             process::exit(1)
         }),
