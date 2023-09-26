@@ -106,7 +106,7 @@ pub fn enable_seccomp(action: SeccompAction, allow_remote_logging: bool) -> Resu
     allow_syscall!(ctx, libc::SYS_fsetxattr);
     #[cfg(not(target_arch = "loongarch64"))]
     allow_syscall!(ctx, libc::SYS_fstat);
-    #[cfg(target_arch = "s390x")]
+    #[cfg(any(target_arch = "s390x", target_arch = "powerpc64"))]
     allow_syscall!(ctx, libc::SYS_fstatfs64);
     allow_syscall!(ctx, libc::SYS_fstatfs);
     allow_syscall!(ctx, libc::SYS_fsync);
