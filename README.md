@@ -342,6 +342,8 @@ host# qemu-system \
 guest# mount -t virtiofs myfs /mnt
 ```
 
+See [FAQ](#faq) for adding virtiofs config to an existing qemu command-line.
+
 ### Running as non-privileged user
 When run without root, virtiofsd requires a user namespace (see `user_namespaces(7)`)
 to be able to switch between arbitrary user/group IDs within the guest.
@@ -416,6 +418,23 @@ mount -o bind share1 share/sh1
 virtiofsd --announce-submounts --shared-dir share ...
 ```
 Note the use of `--announce-submounts` to prevent data loss/corruption.
+
+- How to add virtiofs devices to an existing qemu command-line:
+
+  If `-object memory-backend-memfd,id=mem` and either `-numa node,memdev=mem`
+  or a `memory-backend=mem` property in the `-machine` option
+  have not already been added to the command, add them.
+
+  If a different memory backend is already configured then it should be changed
+  to `memory-backend-memfd`.
+
+  `-object memory-backend-memfd` **must** have the option `share=on`
+  and `size=` **must** match the memory size defined by `-m`.
+
+  For each virtiofs device mount add a
+  `-chardev socket,id=${MATCHING_ID},path=${VIRTIOFSD_SOCKET_PATH}` and
+  `-device vhost-user-fs-pci,queue-size=1024,chardev=${MATCHING_ID},tag=${VIRTIOFS_TAG}`
+  substituting appropriate values for the shell-style variables.
 
 ## SELinux Support
 One can enable support for SELinux by running virtiofsd with option
