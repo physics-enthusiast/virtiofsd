@@ -402,10 +402,16 @@ impl Sandbox {
             // Setup uid/gid mappings
             if uid != 0 {
                 let ppid = unsafe { libc::getppid() };
-                if let Err(why) =
+                if let Err(error) =
                     self.setup_id_mappings(self.uid_map.as_ref(), self.gid_map.as_ref(), ppid)
                 {
-                    panic!("couldn't setup id mappings: {}", why)
+                    // We don't really need to close the pipes here, since the OS will close the FDs
+                    // after the process exits. But let's do it explicitly to signal an error to the
+                    // other end of the pipe.
+                    drop(x_reader);
+                    drop(y_writer);
+                    error!("sandbox: couldn't setup id mappings: {}", error);
+                    process::exit(1);
                 };
             }
 
@@ -432,7 +438,9 @@ impl Sandbox {
                 .write_all(&[IdMapSetUpPipeMessage::Request as u8])
                 .unwrap();
 
-            // Receive the signal that mapping is done
+            // Receive the signal that mapping is done. If the child process exits
+            // before setting up the mapping, closing the pipe before sending the
+            // message, `read_exact()` will fail with `UnexpectedEof`.
             y_reader
                 .read_exact(&mut output)
                 .unwrap_or_else(|_| process::exit(1));
