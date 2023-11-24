@@ -292,8 +292,8 @@ For additional details please see [Extended attribute mapping](doc/xattr-mapping
 ```
 When running virtiofsd as non-root, map a range of UIDs from host to namespace.
 In order to use this option, the range of subordinate user IDs must have been set up via
-`subuid(5)`. virtiofsd uses `newuidmap(1)`, that requires a valid subuid, to do the mapping.
-If this option is not provided, virtiofsd will set up a 1-to-1 mapping for current uid.
+`subuid(5)`. virtiofsd uses `newuidmap(1)` for non-trivial cases, that requires a valid subuid,
+to do the mapping. If this option is not provided, virtiofsd will set up a 1-to-1 mapping for current uid.
 
 namespace_uid: Beginning of the range of UIDs inside the user namespace.
 host_uid: Beginning of the range of UIDs outside the user namespace.
@@ -310,8 +310,8 @@ For example, --uid-map=:0:1000:1: would map UID 1000 to root’s UID in the name
 ```
 When running virtiofsd as non-root, map a range of GIDs from host to namespace.
 In order to use this option, the range of subordinate group IDs must have been set up via
-`subgid(5)`. virtiofsd uses `newgidmap(1)`, that requires a valid subgid, to do the mapping.
-If this option is not provided, virtiofsd will set up a 1-to-1 mapping for current gid.
+`subgid(5)`. virtiofsd uses `newgidmap(1)` for non-trivial cases, that requires a valid subgid,
+to do the mapping. If this option is not provided, virtiofsd will set up a 1-to-1 mapping for current gid.
 
 namespace_gid: Beginning of the range of GIDs inside the user namespace.
 host_gid: Beginning of the range of GIDs outside the user namespace.
