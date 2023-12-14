@@ -503,6 +503,31 @@ impl Sandbox {
         Ok(())
     }
 
+    fn must_drop_supplemental_groups(&self) -> Result<bool, Error> {
+        let uid = unsafe { libc::geteuid() };
+        if uid != 0 {
+            return Ok(false);
+        }
+
+        let uid_mmap_data =
+            fs::read_to_string("/proc/self/uid_map").map_err(Error::DropSupplementalGroups)?;
+        let uid_map: Vec<_> = uid_mmap_data.split_whitespace().collect();
+
+        let gid_map_data =
+            fs::read_to_string("/proc/self/gid_map").map_err(Error::DropSupplementalGroups)?;
+        let gid_map: Vec<_> = gid_map_data.split_whitespace().collect();
+
+        let setgroups =
+            fs::read_to_string("/proc/self/setgroups").map_err(Error::DropSupplementalGroups)?;
+
+        // A single line mapping only has 3 fields, and the 'count' field should
+        // be 1.
+        let single_uid_mapping = uid_map.len() == 3 && uid_map[2] == "1";
+        let single_gid_mapping = gid_map.len() == 3 && gid_map[2] == "1";
+
+        Ok(setgroups.trim() != "deny" || !single_uid_mapping || !single_gid_mapping)
+    }
+
     fn drop_supplemental_groups(&self) -> Result<(), Error> {
         let ngroups = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
         if ngroups < 0 {
@@ -534,19 +559,15 @@ impl Sandbox {
             return Err(Error::SandboxModeInvalidGidMap);
         }
 
-        // Drop supplemental groups. This is running as root and will
-        // support arbitrary uid/gid switching and we don't want to
-        // retain membership of any supplementary groups.
-        //
-        // This is not necessarily required for non-root case, where
-        // unprivileged user has started us. We are not going to setup
-        // any sandbox or we will setup one user namespace with 1:1
-        // mapping and there is no arbitrary uid/gid switching at all.
-        // In this mode setgroups() is not allowed, so we can't drop
-        // supplementary groups even if wanted to. Only way to do this
-        // will be to use newuidmap/newgidmap to setup user namespace
-        // which will allow setgroups().
-        if uid == 0 {
+        // We must drop supplemental groups membership if we support switching
+        // between arbitrary uids/gids, unless the following conditions are met:
+        // we're not running as root or we are inside a user namespace with only
+        // one uid and gid mapping and '/proc/self/setgroups' is equal to
+        // "deny". In both of these cases, no arbitrary uid/gid switching is
+        // possible and thus there's no need to drop supplemental groups. In
+        // both of these scenarios calling setgroups() is also not allowed so we
+        // avoid calling it since we know it will return a privilege error.
+        if self.must_drop_supplemental_groups()? {
             self.drop_supplemental_groups()?;
         }
 
