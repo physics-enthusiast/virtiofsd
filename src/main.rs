@@ -21,7 +21,7 @@ use clap::{CommandFactory, Parser};
 
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Error::Disconnected;
-use vhost::vhost_user::{Listener, Slave};
+use vhost::vhost_user::{Backend, Listener};
 use vhost_user_backend::Error::HandleRequest;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, VringMutex, VringState, VringT};
 use virtio_bindings::bindings::virtio_config::*;
@@ -120,8 +120,8 @@ struct VhostUserFsThread<F: FileSystem + Send + Sync + 'static> {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     kill_evt: EventFd,
     server: Arc<Server<F>>,
-    // handle request from slave to master
-    vu_req: Option<Slave>,
+    // handle request from backend to frontend
+    vu_req: Option<Backend>,
     event_idx: bool,
     pool: Option<ThreadPool>,
 }
@@ -299,7 +299,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
         &self,
         device_event: u16,
         vrings: &[VringMutex],
-    ) -> VhostUserBackendResult<bool> {
+    ) -> VhostUserBackendResult<()> {
         let idx = match device_event {
             HIPRIO_QUEUE_EVENT => {
                 debug!("HIPRIO_QUEUE_EVENT");
@@ -329,14 +329,14 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
             self.process_queue_pool(vrings[idx].clone())?;
         }
 
-        Ok(false)
+        Ok(())
     }
 
     fn handle_event_serial(
         &self,
         device_event: u16,
         vrings: &[VringMutex],
-    ) -> VhostUserBackendResult<bool> {
+    ) -> VhostUserBackendResult<()> {
         let mut vring_state = match device_event {
             HIPRIO_QUEUE_EVENT => {
                 debug!("HIPRIO_QUEUE_EVENT");
@@ -366,7 +366,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
             self.process_queue_serial(&mut vring_state)?;
         }
 
-        Ok(false)
+        Ok(())
     }
 }
 
@@ -402,7 +402,10 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
     }
 }
 
-impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend<VringMutex> for VhostUserFsBackend<F> {
+impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
+    type Bitmap = ();
+    type Vring = VringMutex;
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -420,8 +423,8 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend<VringMutex> for Vho
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         let mut protocol_features = VhostUserProtocolFeatures::MQ
-            | VhostUserProtocolFeatures::SLAVE_REQ
-            | VhostUserProtocolFeatures::SLAVE_SEND_FD
+            | VhostUserProtocolFeatures::BACKEND_REQ
+            | VhostUserProtocolFeatures::BACKEND_SEND_FD
             | VhostUserProtocolFeatures::REPLY_ACK
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
 
@@ -480,7 +483,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend<VringMutex> for Vho
         evset: EventSet,
         vrings: &[VringMutex],
         _thread_id: usize,
-    ) -> VhostUserBackendResult<bool> {
+    ) -> VhostUserBackendResult<()> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
@@ -498,7 +501,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend<VringMutex> for Vho
         Some(self.thread.read().unwrap().kill_evt.try_clone().unwrap())
     }
 
-    fn set_slave_req_fd(&self, vu_req: Slave) {
+    fn set_backend_req_fd(&self, vu_req: Backend) {
         self.thread.write().unwrap().vu_req = Some(vu_req);
     }
 }
