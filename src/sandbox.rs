@@ -8,6 +8,7 @@ use std::ffi::CString;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::path::Path;
 use std::process::{self, Command};
 use std::str::FromStr;
 use std::{error, fmt, io};
@@ -509,6 +510,12 @@ impl Sandbox {
             return Ok(false);
         }
 
+        // If we are running as root and the system does not support user namespaces,
+        // we must drop supplemental groups.
+        if !Path::new("/proc/self/ns/user").exists() {
+            return Ok(true);
+        }
+
         let uid_mmap_data =
             fs::read_to_string("/proc/self/uid_map").map_err(Error::DropSupplementalGroups)?;
         let uid_map: Vec<_> = uid_mmap_data.split_whitespace().collect();
@@ -567,7 +574,18 @@ impl Sandbox {
         // possible and thus there's no need to drop supplemental groups. In
         // both of these scenarios calling setgroups() is also not allowed so we
         // avoid calling it since we know it will return a privilege error.
-        if self.must_drop_supplemental_groups()? {
+        let must_drop_supplemental_groups = match self.must_drop_supplemental_groups() {
+            Ok(must_drop) => must_drop,
+            Err(error) => {
+                warn!(
+                    "Failed to determine whether supplemental groups must be dropped: {error}; \
+                    defaulting to trying to drop supplemental groups"
+                );
+                true
+            }
+        };
+
+        if must_drop_supplemental_groups {
             self.drop_supplemental_groups()?;
         }
 
