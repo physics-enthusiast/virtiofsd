@@ -73,6 +73,7 @@ pub fn sfork() -> io::Result<i32> {
     // use a new type PidFd to prevent using the File's methods directly, and in the hope
     // that whoever wants to do so will read this first.
     // This is a temporary solution until OwnedFd is stabilized.
+    #[allow(dead_code)]
     struct PidFd(File);
     let _pidfd = unsafe { PidFd(File::from_raw_fd(parent_pidfd)) };
 

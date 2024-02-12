@@ -1594,6 +1594,8 @@ impl FileSystem for PassthroughFs {
             inode_data.get_file()?
         };
 
+        // `HandleData` is never read, but we need to keep a reference so its file is not dropped
+        #[allow(dead_code)]
         enum Data {
             Handle(Arc<HandleData>, RawFd),
             ProcPath(CString),

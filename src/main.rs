@@ -61,6 +61,9 @@ const MAX_TAG_LEN: usize = 36;
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
+// The compiler warns that some wrapped values are never read, but they are in fact read by
+// `<Error as fmt::Display>::fmt()` via the derived `Debug`.
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Error {
     /// Failed to create kill eventfd.
