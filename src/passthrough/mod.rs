@@ -436,7 +436,7 @@ impl PassthroughFs {
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)
     }
 
@@ -446,7 +446,7 @@ impl PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         // When writeback caching is enabled, the kernel may send read requests even if the
@@ -636,7 +636,7 @@ impl PassthroughFs {
             .read()
             .unwrap()
             .get(&parent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let p_file = p.get_file()?;
@@ -842,7 +842,7 @@ impl PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let inode_file = data.get_file()?;
@@ -857,7 +857,7 @@ impl PassthroughFs {
             .read()
             .unwrap()
             .get(&parent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let parent_file = data.get_file()?;
@@ -1224,7 +1224,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let inode_file = data.get_file()?;
@@ -1291,7 +1291,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&parent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let parent_file = data.get_file()?;
@@ -1394,7 +1394,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&parent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let parent_file = data.get_file()?;
@@ -1583,7 +1583,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         // In this case, we need to open a new O_RDWR FD
@@ -1743,14 +1743,14 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&olddir)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
         let new_inode = self
             .inodes
             .read()
             .unwrap()
             .get(&newdir)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let old_file = old_inode.get_file()?;
@@ -1791,7 +1791,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&parent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let parent_file = data.get_file()?;
@@ -1847,14 +1847,14 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
         let new_inode = self
             .inodes
             .read()
             .unwrap()
             .get(&newparent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let inode_file = data.get_file()?;
@@ -1893,7 +1893,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&parent)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let parent_file = data.get_file()?;
@@ -1933,7 +1933,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let inode_file = data.get_file()?;
@@ -2023,7 +2023,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let inode_file = data.get_file()?;
@@ -2085,7 +2085,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let name = self.map_client_xattrname(name)?;
@@ -2196,7 +2196,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let res = if is_safe_inode(data.mode) {
@@ -2254,7 +2254,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let mut buf = vec![0; size as usize];
@@ -2313,7 +2313,7 @@ impl FileSystem for PassthroughFs {
             .read()
             .unwrap()
             .get(&inode)
-            .map(Arc::clone)
+            .cloned()
             .ok_or_else(ebadf)?;
 
         let name = self.map_client_xattrname(name)?;
