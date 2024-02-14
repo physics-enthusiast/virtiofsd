@@ -821,7 +821,7 @@ fn parse_compat(opt: Opt) -> Opt {
 
     if let Some(compat_options) = opt.compat_options.as_ref() {
         for line in compat_options {
-            for option in line.to_string().split(',') {
+            for option in line.split(',') {
                 if option.contains('=') {
                     parse_tuple(&mut clean_opt, option);
                 } else {
