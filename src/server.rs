@@ -1164,11 +1164,13 @@ impl<F: FileSystem + Sync> Server<F> {
                 let mut err = None;
                 while let Some(dirent) = entries.next() {
                     let mut entry_inode = None;
-                    match self.handle_dirent(&in_header, dirent).and_then(|(d, e)| {
-                        entry_inode = Some(e.inode);
-                        let remaining = (size as usize).saturating_sub(total_written);
-                        add_dirent(&mut cursor, remaining, d, Some(e))
-                    }) {
+                    let bytes_written =
+                        self.handle_dirent(&in_header, dirent).and_then(|(d, e)| {
+                            entry_inode = Some(e.inode);
+                            let remaining = (size as usize).saturating_sub(total_written);
+                            add_dirent(&mut cursor, remaining, d, Some(e))
+                        });
+                    match bytes_written {
                         Ok(0) => {
                             // No more space left in the buffer but we need to undo the lookup
                             // that created the Entry or we will end up with mismatched lookup
