@@ -61,6 +61,9 @@ const MAX_TAG_LEN: usize = 36;
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
+// The compiler warns that some wrapped values are never read, but they are in fact read by
+// `<Error as fmt::Display>::fmt()` via the derived `Debug`.
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Error {
     /// Failed to create kill eventfd.
@@ -818,7 +821,7 @@ fn parse_compat(opt: Opt) -> Opt {
 
     if let Some(compat_options) = opt.compat_options.as_ref() {
         for line in compat_options {
-            for option in line.to_string().split(',') {
+            for option in line.split(',') {
                 if option.contains('=') {
                     parse_tuple(&mut clean_opt, option);
                 } else {
